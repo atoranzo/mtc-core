@@ -78,9 +78,124 @@ impl SequenceGuard for MemoryGuard {
     }
 }
 
+/// What a CA decides at start-up after comparing the guard with the log's
+/// journal: the last checkpoint number the journal recorded as published.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupDecision {
+    /// Start. `orphans` is how many reserved numbers never reached the
+    /// journal: the normal case after a crash between reserving and signing.
+    Start { orphans: u64 },
+    /// Do not start, and say why.
+    Refuse(StartupRefusal),
+}
+
+/// The two states in which the pair (counter, journal) forbids starting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupRefusal {
+    /// The journal recorded a checkpoint the counter never reserved: the
+    /// counter file was deleted (`IndexGuard::open` recreates a missing
+    /// file at zero, silently) or restored from an older copy. Starting
+    /// would reuse checkpoint numbers behind published signatures.
+    CounterBehindJournal { counter: u64, journal: u64 },
+    /// The counter reserved checkpoints but the journal has none: the log
+    /// was lost or restored from before its first checkpoint. Starting
+    /// would publish a tree inconsistent with signatures already out.
+    JournalMissing { counter: u64 },
+}
+
+impl core::fmt::Display for StartupRefusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StartupRefusal::CounterBehindJournal { counter, journal } => write!(
+                f,
+                "the journal recorded checkpoint {journal} but the counter only reserved {counter}: \
+                 counter deleted or restored; do not start"
+            ),
+            StartupRefusal::JournalMissing { counter } => write!(
+                f,
+                "the counter reserved {counter} checkpoints but the journal has none: log lost or \
+                 restored; do not start"
+            ),
+        }
+    }
+}
+
+/// **The start-up policy, applied to the pair ALWAYS.**
+///
+/// `journal_last` is the highest checkpoint number the log's journal
+/// recorded as published, or `None` if it recorded none. The four states
+/// of `hbs-state` map to two decisions, and the journal is consulted in
+/// every one of them, not only when the counter reads zero. That is the
+/// lesson of a defect found by reading Arqueo's node (its start-up policy
+/// consulted the journal only in one branch, so a deleted counter file
+/// reopened at zero and would have re-signed used XMSS leaves): the datum
+/// outside the pair has to be looked at whatever the pair says.
+pub fn startup_check(guard: &impl SequenceGuard, journal_last: Option<u64>) -> StartupDecision {
+    let counter = guard.current();
+    match journal_last {
+        None if counter == 0 => StartupDecision::Start { orphans: 0 },
+        None => StartupDecision::Refuse(StartupRefusal::JournalMissing { counter }),
+        Some(journal) => match reconcile_values(counter, journal) {
+            Reconciliation::InSync { .. } => StartupDecision::Start { orphans: 0 },
+            Reconciliation::CounterAhead { orphans, .. } => StartupDecision::Start { orphans },
+            // `journal == 0` with a counter ahead is a journal that recorded
+            // nothing yet: same as `None`.
+            Reconciliation::KeyAtZero { .. } => {
+                StartupDecision::Refuse(StartupRefusal::JournalMissing { counter })
+            }
+            Reconciliation::KeyAhead { .. } => {
+                StartupDecision::Refuse(StartupRefusal::CounterBehindJournal { counter, journal })
+            }
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_journal_is_consulted_in_every_state() {
+        let mut g = MemoryGuard::default();
+        assert_eq!(
+            startup_check(&g, None),
+            StartupDecision::Start { orphans: 0 }
+        );
+        g.reserve().unwrap();
+        g.reserve().unwrap();
+        assert_eq!(
+            startup_check(&g, Some(2)),
+            StartupDecision::Start { orphans: 0 }
+        );
+        assert_eq!(
+            startup_check(&g, Some(1)),
+            StartupDecision::Start { orphans: 1 }
+        );
+        assert_eq!(
+            startup_check(&g, Some(3)),
+            StartupDecision::Refuse(StartupRefusal::CounterBehindJournal {
+                counter: 2,
+                journal: 3
+            })
+        );
+        assert_eq!(
+            startup_check(&g, None),
+            StartupDecision::Refuse(StartupRefusal::JournalMissing { counter: 2 })
+        );
+        assert_eq!(
+            startup_check(&g, Some(0)),
+            StartupDecision::Refuse(StartupRefusal::JournalMissing { counter: 2 })
+        );
+        // A counter at zero with a journal ahead: the deleted-file case.
+        let fresh = MemoryGuard::default();
+        assert_eq!(
+            startup_check(&fresh, Some(5)),
+            StartupDecision::Refuse(StartupRefusal::CounterBehindJournal {
+                counter: 0,
+                journal: 5
+            })
+        );
+    }
 
     #[test]
     fn only_key_ahead_is_fatal_for_the_checkpoint_counter() {

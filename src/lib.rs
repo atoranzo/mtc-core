@@ -67,7 +67,7 @@ pub use cosign::{
     CosignError, CosignatureVerifier, CosignedMessage, Cosigner, SignedSubtree, SubtreeSignature,
 };
 pub use entry::{LogEntryExtension, MtcLeaf, MtcLogEntry, Validity};
-pub use guard::{MemoryGuard, SequenceGuard};
+pub use guard::{startup_check, MemoryGuard, SequenceGuard, StartupDecision, StartupRefusal};
 pub use hash::{HashValue, HASH_SIZE};
 pub use landmark::{Landmark, LandmarkSequence};
 pub use log::IssuanceLog;
