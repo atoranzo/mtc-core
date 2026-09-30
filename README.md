@@ -406,8 +406,8 @@ dos ejecuciones del ejemplo dan bytes distintos que verifican igual.
 Cómo se prueba, en tres capas:
 
 - **Contra el borrador**: `tests/vectors.rs` reproduce los cuatro vectores
-  acumulados del apéndice de test (712 hashes de subárbol, 12.807 pruebas de
-  inclusión, 42.893 de consistencia y 8.646 coberturas: todos los subárboles
+  acumulados del apéndice de test (712 hashes de subárbol, 12.807 caminos de
+  inclusión, 42.893 caminos de consistencia y 8.646 coberturas: todos los subárboles
   de todos los árboles hasta 130 hojas), más los casos de validez y cobertura
   hasta `2^64-1`; y `tests/large_vectors.rs` evalúa los 24 vectores de
   inclusión y 21 de consistencia que el repositorio del borrador publica para
