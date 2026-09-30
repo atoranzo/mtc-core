@@ -492,3 +492,45 @@ and not what the README describes, are dropped (the test reads
 `tile/entries` only). The counters below are re-run on the tree as pushed,
 checked with `git ls-files`. The lesson is §12's again: a gate that passes on
 files git does not see has not passed on the commit.
+
+## §15 · The interoperability run on the author's machine
+
+**Commit** the one that adds this entry · 2026-09-30
+
+**What changed.** Nothing in the code: this entry records the author's own
+execution of `interop/run.sh` and of the gates on the `interop` branch,
+which §14 left as his to record, and the merge of that branch into `main`
+(fast-forward, `20c9a45..42e405b`).
+
+**The run.** `interop/run.sh` at commit `0129626`, on 2026-09-30 at
+12:19:10 UTC, with Go 1.27.1 installed from go.dev, the reference tool at
+commit `99097c9e0af9641a85311b68f7642978b882d385` (2026-09-29) built with
+`go build` (its `golang.org/x/crypto` v0.54.0 from the module proxy), rustc
+1.97.1 (8bab26f4f 2026-07-14), cargo 1.97.1. Its `results.txt`, verbatim in
+substance: Go → Rust, the same verdict for all 26 certificates (21 OK, 5
+FAIL), and the Go verdicts equal to `tests/vectors/interop-plants-07/
+expected.txt`; Rust → Go, the same verdict as `EXPECTED.txt` for all 9
+certificates with this crate's CA certificate and again with the Go tool's
+CA certificate, and the witness's SPKI line byte-identical to the demo's
+`policy.txt`; the log, 2122 entries read from the tiles, the root
+`nZNno7jRGtX4cD1s/ZPu8u1Jlh6LyRCFGTfok/n3LM8=` equal to the checkpoint's,
+the origin line equal to the derived log ID, the CA's key ID `e5375464`
+equal to the one computed here, and the signature line verifying as a bare
+subtree signature with timestamp zero. `failures: 0`. The same numbers as
+§14's run in the container.
+
+**Counters, run on this machine, at `42e405b`.** `cargo fmt --check`:
+clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`:
+66/0 (passed/failed; `tests/interop_corpus.rs` 4/0) · without `ml-dsa`:
+53/0. The first run of the gates, at `0129626`, gave 62/4: the four tests
+of the corpus, for the reason §14 records. Machine: Linux
+6.18.33.2-microsoft-standard-WSL2 x86_64, WSL2.
+
+**What it does not close.** The open items of README section 7: one
+implementation, no ECDSA or Ed25519 cosigners, the minimal policy, no
+audit. And the two findings for the working group in §14, which are the
+next step outside this repository.
+
+**Lesson.** The second machine found what the first had not: a corpus git
+had never seen. A run on the author's machine is not a formality of the
+method; it is the only run that can find that.

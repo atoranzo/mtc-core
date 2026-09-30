@@ -556,8 +556,8 @@ per version, one ledger entry per change) and none of the STARK code.
   accepts the certificates from here, with this crate's CA certificate and
   with its own (the two CAs share a test key, so the ML-DSA-44 key derivation
   and signatures agree byte for byte). The run is recorded in AUDIT.md §14: it
-  was made by the assistant in a container with Go 1.27.1 built from source;
-  the author's own run, on his machine, is pending and will be its own entry.
+  was made by the assistant in a container with Go 1.27.1 built from source,
+  and repeated by the author on his machine with the same result (§15).
   Not measured: any other implementation, cosigners with ECDSA or Ed25519
   keys (their cosignatures are ignored here), the Go tool's cosigner groups
   (this crate's policy is "the CA and all of these"), and the witness
