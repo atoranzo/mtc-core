@@ -334,10 +334,18 @@ pub fn decode_time(t: &Tlv<'_>) -> Result<u64, DerError> {
     let hh = digits(&rest[4..6])?;
     let mm = digits(&rest[6..8])?;
     let ss = digits(&rest[8..10])?;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+    // RFC 5280 no admite segundos intercalares (00-59) y un dia que no
+    // existe (30 de febrero) no debe convertirse en silencio en el 2 de marzo:
+    // se exige que la fecha civil de vuelta sea la misma.
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 59 {
         return Err(DerError::BadTime);
     }
     let days = days_from_civil(year as i64, m, d);
+    if civil_from_days(days) != (year as i64, m, d) {
+        return Err(DerError::BadTime);
+    }
+    // Anteriores a 1970 (UTCTime 1950-1969): un certificado no las lleva, y
+    // un `u64` no las representa. Fallo cerrado.
     if days < 0 {
         return Err(DerError::BadTime);
     }
@@ -370,16 +378,23 @@ pub fn read_tlv(input: &[u8]) -> Result<(Tlv<'_>, &[u8]), DerError> {
         if n == 0 || n > 8 || input.len() < 2 + n {
             return Err(DerError::BadLength);
         }
-        let mut len = 0usize;
-        for b in &input[2..2 + n] {
-            len = len.checked_shl(8).ok_or(DerError::BadLength)? | *b as usize;
-        }
-        if len < 0x80 || input[2] == 0 {
+        if input[2] == 0 {
             return Err(DerError::BadLength); // no minima
         }
+        let mut len: u64 = 0;
+        for b in &input[2..2 + n] {
+            len = (len << 8) | *b as u64; // n <= 8: no desborda
+        }
+        if len < 0x80 {
+            return Err(DerError::BadLength); // cabia en forma corta
+        }
+        // ⚠️ Un `len` cercano a 2^64 no puede sumarse a `header` sin
+        //    desbordar: lo que no cabe en el buffer es, simplemente, truncado.
+        let len = usize::try_from(len).map_err(|_| DerError::Truncated)?;
         (len, 2 + n)
     };
-    if input.len() < header + len {
+    let end = header.checked_add(len).ok_or(DerError::Truncated)?;
+    if input.len() < end {
         return Err(DerError::Truncated);
     }
     let raw = &input[..header + len];
@@ -443,9 +458,10 @@ pub fn ca_id_from_name(name: &[u8]) -> Result<TrustAnchorId, DerError> {
     TrustAnchorId::from_binary(val.content).map_err(|_| DerError::BadOid)
 }
 
-/// Un `Extensions` con una sola extension `subjectAltName` de nombres DNS.
-/// Ayuda para pruebas y demostraciones: una CA real recibe las
-/// extensiones de su capa de validacion.
+/// Un `Extensions` con una sola extension `subjectAltName` de nombres DNS,
+/// marcada critica (RFC 5280 lo exige si el `subject` va vacio, que es el
+/// caso habitual en TLS). Ayuda para pruebas y demostraciones: una CA real
+/// recibe las extensiones de su capa de validacion.
 pub fn san_dns_extensions(names: &[&str]) -> Vec<u8> {
     let mut general_names = Vec::new();
     for n in names {
@@ -453,6 +469,7 @@ pub fn san_dns_extensions(names: &[&str]) -> Vec<u8> {
     }
     let value = sequence(&general_names);
     let mut ext = oid(&OID_SUBJECT_ALT_NAME);
+    ext.extend([0x01, 0x01, 0xff]); // critical BOOLEAN TRUE
     ext.extend(octet_string(&value));
     sequence(&sequence(&ext))
 }
@@ -622,6 +639,88 @@ mod tests {
         // 2049-12-31T23:59:59Z aun es UTCTime; 2050-01-01 ya es GeneralizedTime.
         assert_eq!(time(2_524_607_999)[0], TAG_UTC_TIME);
         assert_eq!(time(2_524_608_000)[0], TAG_GENERALIZED_TIME);
+    }
+
+    /// Nada de lo que llega por el cable puede hacer que el lector entre en
+    /// panico: longitudes largas que desbordan, indefinidas, no minimas,
+    /// contenido truncado, restos.
+    #[test]
+    fn malformed_der_fails_closed() {
+        let cases: [(&[u8], DerError); 9] = [
+            (
+                &[0x30, 0x88, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+                DerError::Truncated,
+            ),
+            (&[0x30, 0x84, 0xff, 0xff, 0xff, 0xff], DerError::Truncated),
+            (&[0x30, 0x80, 0x00, 0x00], DerError::BadLength), // indefinida
+            (&[0x30, 0x81, 0x05, 1, 2, 3, 4, 5], DerError::BadLength), // cabia en forma corta
+            (&[0x30, 0x82, 0x00, 0x80, 0x00], DerError::BadLength), // no minima
+            (
+                &[0x30, 0x89, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                DerError::BadLength,
+            ), // mas de 8 bytes
+            (&[0x30, 0x05, 1, 2], DerError::Truncated),
+            (&[0x30], DerError::Truncated),
+            (&[0x1f, 0x01, 0x00], DerError::BadLength), // etiqueta larga
+        ];
+        for (input, err) in cases {
+            assert_eq!(read_tlv(input).err(), Some(err), "{}", hex(input));
+        }
+        assert_eq!(
+            expect_tlv(&[0x04, 0x00], TAG_SEQUENCE).err(),
+            Some(DerError::UnexpectedTag {
+                expected: 0x30,
+                found: 0x04
+            })
+        );
+        assert_eq!(
+            parse_certificate(&[0x30, 0x00, 0x00]).err(),
+            Some(DerError::TrailingData)
+        );
+        assert_eq!(
+            parse_tbs(&[0x30, 0x02, 0x05, 0x00]).err(),
+            Some(DerError::UnexpectedTag {
+                expected: TAG_INTEGER,
+                found: 0x05
+            })
+        );
+        // Un BIT STRING con bits sobrantes no es un MTCProof.
+        let mut cert = sequence(&[]);
+        cert.extend(sequence(&[]));
+        cert.extend(tlv(TAG_BIT_STRING, &[0x03, 0xaa]));
+        assert_eq!(
+            parse_certificate(&sequence(&cert)).err(),
+            Some(DerError::BadLength)
+        );
+        // Enteros negativos o no minimos.
+        assert_eq!(decode_integer_u64(&[0x80]), Err(DerError::BadInteger));
+        assert_eq!(decode_integer_u64(&[0x00, 0x01]), Err(DerError::BadInteger));
+        assert_eq!(decode_integer_u64(&[0x01; 9]), Err(DerError::BadInteger));
+        assert_eq!(decode_integer_u64(&[]), Err(DerError::BadInteger));
+    }
+
+    #[test]
+    fn impossible_dates_are_rejected() {
+        for bad in [
+            "230230120000Z", // 30 de febrero
+            "230229120000Z", // 2023 no es bisiesto
+            "231301120000Z", // mes 13
+            "230101120060Z", // segundo 60
+            "230101240000Z", // hora 24
+            "23010112000Z",  // corto
+            "230101120000",  // sin Z
+            "691231235959Z", // 1969: anterior a la epoca
+        ] {
+            let enc = tlv(TAG_UTC_TIME, bad.as_bytes());
+            let (t, _) = read_tlv(&enc).unwrap();
+            assert_eq!(decode_time(&t), Err(DerError::BadTime), "{bad}");
+        }
+        let leap = tlv(TAG_GENERALIZED_TIME, b"20240229120000Z");
+        let (t, _) = read_tlv(&leap).unwrap();
+        assert!(decode_time(&t).is_ok()); // 2024 si es bisiesto
+        let pre_epoch = tlv(TAG_GENERALIZED_TIME, b"19690101000000Z");
+        let (t, _) = read_tlv(&pre_epoch).unwrap();
+        assert_eq!(decode_time(&t), Err(DerError::BadTime));
     }
 
     #[test]

@@ -4,7 +4,10 @@
 //! —firmar la cabeza de epoca con un preambulo de dominio, **reservando el
 //! indice antes** y **verificando la propia salida antes de devolverla**—
 //! aqui lo hace un [`Cosigner`] sobre el `CosignedMessage` del borrador
-//! (seccion «Signature Format»), con la etiqueta `subtree/v1\n\0`.
+//! (seccion «Signature Format»), con la etiqueta `subtree/v1\n\0`. Es la
+//! misma estructura `cosigned_message` de la especificacion C2SP
+//! `tlog-cosignature` para ML-DSA-44, byte a byte: lo comprueba un test
+//! contra la implementacion de referencia en Go del borrador.
 //!
 //! ## Por que la CA firma poco, y que permite eso
 //!
@@ -17,16 +20,19 @@
 //! [`Cosigner::sign_message`] toma `&mut self`: un firmante con estado
 //! tiene que poder reservar su indice.
 //!
-//! ## ML-DSA
+//! ## ML-DSA: con sal («hedged») por defecto
 //!
-//! [`mldsa::MlDsaCosigner`] firma en modo puro y determinista con contexto
-//! vacio, que es lo que `TLOG-COSIGNATURE` fija para ML-DSA-44. La
-//! alineacion fina con esa especificacion (como se nombra la clave, el
-//! `key id`) queda declarada como pendiente en el plan.
+//! FIPS 204 define dos variantes de firma: la **hedged** (32 bytes
+//! aleatorios por firma) es la recomendada, y la determinista es opcional y
+//! el propio estandar advierte de su menor resistencia a ataques de fallo
+//! y de canal lateral. Ninguna de las dos cambia la verificacion, y
+//! `tlog-cosignature` no fija ninguna. [`mldsa::MlDsaCosigner::from_seed`]
+//! firma con sal tomada del sistema; [`mldsa::MlDsaCosigner::deterministic`]
+//! existe para reproducir vectores, y lo dice.
 
 use crate::hash::HashValue;
 use crate::subtree::Subtree;
-use crate::tai::TrustAnchorId;
+use crate::tai::{TaiError, TrustAnchorId};
 
 /// `uint8 label[12] = "subtree/v1\n\0"`.
 pub const SUBTREE_LABEL: &[u8; 12] = b"subtree/v1\n\0";
@@ -37,7 +43,8 @@ pub struct CosignedMessage {
     pub cosigner_id: TrustAnchorId,
     /// Cero en las cofirmas que van dentro de un certificado. Distinto de
     /// cero solo en un checkpoint con sello de tiempo (`start = 0`, `end`
-    /// = el mayor arbol consistente observado).
+    /// = el mayor arbol consistente observado). **Si `start` no es cero,
+    /// tiene que ser cero**: lo exigen el borrador y `tlog-cosignature`.
     pub timestamp: u64,
     pub log_id: TrustAnchorId,
     pub subtree: Subtree,
@@ -45,12 +52,32 @@ pub struct CosignedMessage {
 }
 
 impl CosignedMessage {
+    /// Las reglas que un mensaje tiene que cumplir antes de firmarse.
+    pub fn check(&self) -> Result<(), CosignError> {
+        self.subtree.check()?;
+        if self.timestamp != 0 && self.subtree.start != 0 {
+            return Err(CosignError::TimestampOnSubtree {
+                start: self.subtree.start,
+                timestamp: self.timestamp,
+            });
+        }
+        // `tlog-cosignature`: el sello de tiempo no supera 2^63 - 1.
+        if self.timestamp > i64::MAX as u64 {
+            return Err(CosignError::TimestampOnSubtree {
+                start: self.subtree.start,
+                timestamp: self.timestamp,
+            });
+        }
+        Ok(())
+    }
+
     /// La serializacion TLS del `CosignedMessage`: **una sola definicion**
-    /// para quien firma y para quien verifica.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let name = self.cosigner_id.oid_name();
-        let origin = self.log_id.oid_name();
-        debug_assert!(name.len() <= 255 && origin.len() <= 255);
+    /// para quien firma y para quien verifica. Falla cerrado si un nombre
+    /// no cabe en su prefijo de un byte o el mensaje viola una regla.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, CosignError> {
+        self.check()?;
+        let name = self.cosigner_id.oid_name()?;
+        let origin = self.log_id.oid_name()?;
         let mut out = Vec::with_capacity(12 + 1 + name.len() + 8 + 1 + origin.len() + 8 + 8 + 32);
         out.extend_from_slice(SUBTREE_LABEL);
         out.push(name.len() as u8);
@@ -61,7 +88,7 @@ impl CosignedMessage {
         out.extend_from_slice(&self.subtree.start.to_be_bytes());
         out.extend_from_slice(&self.subtree.end.to_be_bytes());
         out.extend_from_slice(&self.subtree_hash);
-        out
+        Ok(out)
     }
 }
 
@@ -107,15 +134,32 @@ impl SignedSubtree {
 pub enum CosignError {
     /// El algoritmo no pudo firmar, o la firma recien hecha no verifica.
     Signing(String),
+    /// No hubo entropia para la sal de una firma con sal.
+    Randomness(String),
     /// El guardian del indice se nego (fsync falso, contador corrupto…).
     Guard(hbs_state::GuardError),
+    /// Un identificador no cabe en el mensaje.
+    Tai(TaiError),
+    /// El subarbol no es valido.
+    Subtree(crate::subtree::SubtreeError),
+    /// Un sello de tiempo sobre un subarbol que no empieza en cero.
+    TimestampOnSubtree { start: u64, timestamp: u64 },
 }
 
 impl core::fmt::Display for CosignError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CosignError::Signing(s) => write!(f, "firma: {s}"),
+            CosignError::Randomness(s) => write!(f, "entropia: {s}"),
             CosignError::Guard(g) => write!(f, "guardian: {g}"),
+            CosignError::Tai(e) => write!(f, "identificador: {e}"),
+            CosignError::Subtree(e) => write!(f, "subarbol: {e}"),
+            CosignError::TimestampOnSubtree { start, timestamp } => {
+                write!(
+                    f,
+                    "sello de tiempo {timestamp} sobre un subarbol que empieza en {start}"
+                )
+            }
         }
     }
 }
@@ -128,15 +172,27 @@ impl From<hbs_state::GuardError> for CosignError {
     }
 }
 
+impl From<TaiError> for CosignError {
+    fn from(e: TaiError) -> Self {
+        CosignError::Tai(e)
+    }
+}
+
+impl From<crate::subtree::SubtreeError> for CosignError {
+    fn from(e: crate::subtree::SubtreeError) -> Self {
+        CosignError::Subtree(e)
+    }
+}
+
 /// Quien firma subarboles de un log.
 pub trait Cosigner {
     fn cosigner_id(&self) -> &TrustAnchorId;
 
-    /// Firma los bytes de un `CosignedMessage` cuyo `cosigner_id` es el
-    /// propio. `&mut self` porque un firmante con estado consume indice.
+    /// Firma un `CosignedMessage` cuyo `cosigner_id` es el propio.
+    /// `&mut self` porque un firmante con estado consume indice.
     fn sign_message(&mut self, message: &CosignedMessage) -> Result<Vec<u8>, CosignError>;
 
-    /// Compone el mensaje y firma.
+    /// Compone el mensaje, lo comprueba y firma.
     fn sign_subtree(
         &mut self,
         log_id: &TrustAnchorId,
@@ -151,6 +207,7 @@ pub trait Cosigner {
             subtree,
             subtree_hash,
         };
+        message.check()?;
         let signature = self.sign_message(&message)?;
         Ok(SubtreeSignature {
             cosigner_id: message.cosigner_id,
@@ -170,27 +227,61 @@ pub mod mldsa {
     //! ML-DSA (FIPS 204) como cofirmante y como verificador.
 
     use super::{CosignError, CosignatureVerifier, CosignedMessage, Cosigner};
+    use crate::hash::sha256;
     use crate::tai::TrustAnchorId;
-    use ml_dsa::signature::{Keypair, Signer};
-    use ml_dsa::{EncodedVerifyingKey, MlDsaParams, Seed, Signature, SigningKey, VerifyingKey};
+    use ml_dsa::signature::Keypair;
+    use ml_dsa::{
+        EncodedVerifyingKey, MlDsaParams, Seed, Signature, SigningKey, VerifyingKey, B32,
+    };
+    use zeroize::Zeroize;
 
     pub use ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
 
-    /// Un cofirmante ML-DSA. `P` es `MlDsa44` (el que TLOG-COSIGNATURE
-    /// fija), `MlDsa65` o `MlDsa87`.
+    /// El byte de tipo de firma de `tlog-cosignature` para ML-DSA-44.
+    pub const TLOG_KEY_TYPE_MLDSA44: u8 = 0x06;
+    /// Bytes de una clave publica ML-DSA-44 (`pkEncode`).
+    pub const MLDSA44_PUBLIC_KEY_LEN: usize = 1312;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum SigningMode {
+        /// La variante recomendada por FIPS 204: 32 bytes de sal por firma.
+        Hedged,
+        /// La variante opcional: reproducible, y por eso mas expuesta a
+        /// ataques de fallo. Para vectores de prueba.
+        Deterministic,
+    }
+
+    /// Un cofirmante ML-DSA. `P` es `MlDsa44` (el que `tlog-cosignature` y
+    /// el perfil `mtc-tlog` fijan), `MlDsa65` o `MlDsa87`.
     pub struct MlDsaCosigner<P: MlDsaParams> {
         id: TrustAnchorId,
         key: SigningKey<P>,
+        mode: SigningMode,
     }
 
     impl<P: MlDsaParams> MlDsaCosigner<P> {
         /// ⚠️ **La semilla es material de clave.** De donde sale (HSM, KMS,
         /// fichero 0600 como `hbs_state::seed`) es decision de despliegue.
+        /// Se borra la copia local al terminar; **la del llamante es suya**.
+        /// Firma con sal ([`SigningMode::Hedged`]).
         pub fn from_seed(id: TrustAnchorId, seed: [u8; 32]) -> Self {
-            MlDsaCosigner {
-                id,
-                key: SigningKey::<P>::from_seed(&Seed::from(seed)),
-            }
+            Self::with_mode(id, seed, SigningMode::Hedged)
+        }
+
+        /// Firma determinista: la misma entrada, la misma firma. Solo para
+        /// reproducir vectores; ver el aviso del modulo.
+        pub fn deterministic(id: TrustAnchorId, seed: [u8; 32]) -> Self {
+            Self::with_mode(id, seed, SigningMode::Deterministic)
+        }
+
+        fn with_mode(id: TrustAnchorId, mut seed: [u8; 32], mode: SigningMode) -> Self {
+            let key = SigningKey::<P>::from_seed(&Seed::from(seed));
+            seed.zeroize();
+            MlDsaCosigner { id, key, mode }
+        }
+
+        pub fn mode(&self) -> SigningMode {
+            self.mode
         }
 
         /// La clave publica codificada (`pkEncode`), para el certificado de
@@ -204,6 +295,39 @@ pub mod mldsa {
                 key: self.key.verifying_key(),
             }
         }
+
+        /// El *key ID* de `tlog-cosignature` para ML-DSA-44:
+        /// `SHA-256(nombre || "\n" || 0x06 || clave publica de 1312 bytes)[:4]`.
+        /// Es lo que va delante de la firma en la linea de un checkpoint
+        /// tlog. Solo esta definido para ML-DSA-44.
+        pub fn tlog_key_id(&self) -> Result<[u8; 4], CosignError> {
+            let pk = self.verifying_key_bytes();
+            if pk.len() != MLDSA44_PUBLIC_KEY_LEN {
+                return Err(CosignError::Signing(format!(
+                    "tlog-cosignature solo define el key ID para ML-DSA-44 (clave de {MLDSA44_PUBLIC_KEY_LEN} bytes, no {})",
+                    pk.len()
+                )));
+            }
+            let mut input = self.id.oid_name()?.into_bytes();
+            input.push(b'\n');
+            input.push(TLOG_KEY_TYPE_MLDSA44);
+            input.extend_from_slice(&pk);
+            let h = sha256(&input);
+            Ok([h[0], h[1], h[2], h[3]])
+        }
+
+        /// La firma tal como va en una linea de nota tlog (antes de base64):
+        /// `key_id || timestamped_signature { u64 timestamp; firma }`.
+        pub fn tlog_note_signature(
+            &self,
+            timestamp: u64,
+            signature: &[u8],
+        ) -> Result<Vec<u8>, CosignError> {
+            let mut out = self.tlog_key_id()?.to_vec();
+            out.extend_from_slice(&timestamp.to_be_bytes());
+            out.extend_from_slice(signature);
+            Ok(out)
+        }
     }
 
     impl<P: MlDsaParams> Cosigner for MlDsaCosigner<P> {
@@ -212,11 +336,23 @@ pub mod mldsa {
         }
 
         fn sign_message(&mut self, message: &CosignedMessage) -> Result<Vec<u8>, CosignError> {
-            let bytes = message.to_bytes();
-            let sig = self
-                .key
-                .try_sign(&bytes)
-                .map_err(|e| CosignError::Signing(e.to_string()))?;
+            let bytes = message.to_bytes()?;
+            let expanded = self.key.expanded_key();
+            let sig = match self.mode {
+                SigningMode::Deterministic => expanded
+                    .sign_deterministic(&bytes, &[])
+                    .map_err(|e| CosignError::Signing(e.to_string()))?,
+                SigningMode::Hedged => {
+                    let mut rnd = [0u8; 32];
+                    getrandom::fill(&mut rnd)
+                        .map_err(|e| CosignError::Randomness(e.to_string()))?;
+                    // Algoritmo 2 de FIPS 204 en modo puro con contexto vacio:
+                    // M' = 0x00 || len(ctx) = 0x00 || ctx (vacio) || M.
+                    let sig = expanded.sign_internal(&[&[0x00, 0x00], &bytes], &B32::from(rnd));
+                    rnd.zeroize();
+                    sig
+                }
+            };
             let encoded = sig.encode().to_vec();
             // ⚠️ Verificar la propia salida ANTES de devolverla, con el mismo
             // verificador que usara un tercero (regla de §299 de Arqueo).
@@ -257,31 +393,74 @@ pub mod mldsa {
         use super::*;
         use crate::subtree::Subtree;
 
+        fn message(id: &TrustAnchorId, hash: u8) -> CosignedMessage {
+            CosignedMessage {
+                cosigner_id: id.clone(),
+                timestamp: 0,
+                log_id: id.log_id(1).unwrap(),
+                subtree: Subtree { start: 0, end: 5 },
+                subtree_hash: [hash; 32],
+            }
+        }
+
         #[test]
         fn a_cosignature_verifies_and_a_tampered_one_does_not() {
             let id = TrustAnchorId::from_ascii("32473.1").unwrap();
             let mut signer = MlDsaCosigner::<MlDsa44>::from_seed(id.clone(), [1u8; 32]);
-            let log = id.log_id(1);
+            let log = id.log_id(1).unwrap();
             let sig = signer
                 .sign_subtree(&log, Subtree { start: 0, end: 5 }, [9u8; 32], 0)
                 .unwrap();
             assert_eq!(sig.signature.len(), 2420); // ML-DSA-44
             let verifier =
                 MlDsaVerifier::<MlDsa44>::from_bytes(&signer.verifying_key_bytes()).unwrap();
-            let msg = CosignedMessage {
-                cosigner_id: id.clone(),
-                timestamp: 0,
-                log_id: log.clone(),
-                subtree: Subtree { start: 0, end: 5 },
-                subtree_hash: [9u8; 32],
-            };
-            assert!(verifier.verify(&msg.to_bytes(), &sig.signature));
-            let other = CosignedMessage {
-                subtree_hash: [8u8; 32],
-                ..msg
-            };
-            assert!(!verifier.verify(&other.to_bytes(), &sig.signature));
+            let msg = message(&id, 9);
+            assert!(verifier.verify(&msg.to_bytes().unwrap(), &sig.signature));
+            let other = message(&id, 8);
+            assert!(!verifier.verify(&other.to_bytes().unwrap(), &sig.signature));
             assert!(!verifier.verify(&[], &sig.signature[..100]));
+            assert!(MlDsaVerifier::<MlDsa44>::from_bytes(&[0; 100]).is_none());
+        }
+
+        /// Con sal, dos firmas del mismo mensaje difieren y las dos verifican;
+        /// sin sal, coinciden. La verificacion no distingue.
+        #[test]
+        fn hedged_signatures_differ_and_verify_while_deterministic_ones_repeat() {
+            let id = TrustAnchorId::from_ascii("32473.1").unwrap();
+            let msg = message(&id, 3);
+            let mut hedged = MlDsaCosigner::<MlDsa44>::from_seed(id.clone(), [5u8; 32]);
+            let a = hedged.sign_message(&msg).unwrap();
+            let b = hedged.sign_message(&msg).unwrap();
+            assert_ne!(a, b);
+            let v = hedged.verifier();
+            assert!(
+                v.verify(&msg.to_bytes().unwrap(), &a) && v.verify(&msg.to_bytes().unwrap(), &b)
+            );
+            let mut det = MlDsaCosigner::<MlDsa44>::deterministic(id, [5u8; 32]);
+            let c = det.sign_message(&msg).unwrap();
+            assert_eq!(c, det.sign_message(&msg).unwrap());
+            assert!(
+                v.verify(&msg.to_bytes().unwrap(), &c),
+                "misma clave, distinta variante, misma verificacion"
+            );
+        }
+
+        #[test]
+        fn tlog_key_id_follows_c2sp() {
+            let id = TrustAnchorId::from_ascii("32473.1").unwrap();
+            let signer = MlDsaCosigner::<MlDsa44>::from_seed(id.clone(), [1u8; 32]);
+            let mut input = b"oid/1.3.6.1.4.1.32473.1\n\x06".to_vec();
+            input.extend(signer.verifying_key_bytes());
+            let h = sha256(&input);
+            assert_eq!(signer.tlog_key_id().unwrap(), [h[0], h[1], h[2], h[3]]);
+            let note = signer
+                .tlog_note_signature(1_700_000_000, &[0xaa; 3])
+                .unwrap();
+            assert_eq!(note.len(), 4 + 8 + 3);
+            assert_eq!(&note[4..12], &1_700_000_000u64.to_be_bytes());
+            // ML-DSA-65 no tiene key ID definido.
+            let big = MlDsaCosigner::<MlDsa65>::from_seed(id, [1u8; 32]);
+            assert!(big.tlog_key_id().is_err());
         }
     }
 }
@@ -296,11 +475,11 @@ mod tests {
         let m = CosignedMessage {
             cosigner_id: ca.clone(),
             timestamp: 0,
-            log_id: ca.log_id(1),
+            log_id: ca.log_id(1).unwrap(),
             subtree: Subtree { start: 4, end: 8 },
             subtree_hash: [0xab; 32],
         };
-        let b = m.to_bytes();
+        let b = m.to_bytes().unwrap();
         assert_eq!(&b[..12], b"subtree/v1\n\0");
         let name = b"oid/1.3.6.1.4.1.32473.1";
         assert_eq!(b[12] as usize, name.len());
@@ -313,6 +492,52 @@ mod tests {
         assert_eq!(&b[s..s + 8], &4u64.to_be_bytes());
         assert_eq!(&b[s + 8..s + 16], &8u64.to_be_bytes());
         assert_eq!(&b[s + 16..], &[0xab; 32]);
+    }
+
+    #[test]
+    fn a_timestamp_on_a_subtree_that_does_not_start_at_zero_is_rejected() {
+        let ca = TrustAnchorId::from_ascii("32473.1").unwrap();
+        let m = CosignedMessage {
+            cosigner_id: ca.clone(),
+            timestamp: 7,
+            log_id: ca.log_id(1).unwrap(),
+            subtree: Subtree { start: 4, end: 8 },
+            subtree_hash: [0; 32],
+        };
+        assert!(matches!(
+            m.to_bytes(),
+            Err(CosignError::TimestampOnSubtree {
+                start: 4,
+                timestamp: 7
+            })
+        ));
+        let checkpoint = CosignedMessage {
+            subtree: Subtree { start: 0, end: 8 },
+            ..m.clone()
+        };
+        assert!(checkpoint.to_bytes().is_ok());
+        let invalid = CosignedMessage {
+            subtree: Subtree { start: 1, end: 5 },
+            timestamp: 0,
+            ..m
+        };
+        assert!(matches!(invalid.to_bytes(), Err(CosignError::Subtree(_))));
+    }
+
+    #[test]
+    fn a_name_that_does_not_fit_fails_closed() {
+        let long = TrustAnchorId::from_binary(&[0x7f; 100]).unwrap();
+        let m = CosignedMessage {
+            cosigner_id: long.clone(),
+            timestamp: 0,
+            log_id: long,
+            subtree: Subtree { start: 0, end: 1 },
+            subtree_hash: [0; 32],
+        };
+        assert!(matches!(
+            m.to_bytes(),
+            Err(CosignError::Tai(TaiError::NameTooLong(_)))
+        ));
     }
 
     #[test]

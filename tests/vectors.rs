@@ -1,7 +1,9 @@
 //! Los vectores acumulados del borrador (apendice «Test Vectors»): para
 //! todos los subarboles de todos los arboles hasta 130 hojas, un hash
-//! rodante de las salidas de cada algoritmo. Si uno solo de los ~2 millones
-//! de casos difiere, el hash final no cuadra.
+//! rodante de las salidas de cada algoritmo: 712 hashes de subarbol,
+//! 12.807 pruebas de inclusion, 42.893 pruebas de consistencia y 8.646
+//! coberturas, 65.058 casos en total. Si uno solo difiere, el hash final no
+//! cuadra.
 
 use mtc_core::der::hex;
 use mtc_core::hash::hash_leaf;

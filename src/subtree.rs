@@ -6,13 +6,16 @@
 //! **extendidos a subarboles `[start, end)`**, que es lo que el borrador
 //! anade a RFC 9162 (seccion «Subtrees»).
 //!
-//! ⚠️ **La verificacion es la recursion espejo de la generacion**, como en
-//! el MMR de Arqueo: el generador y el verificador comparten la particion
-//! `k = mayor potencia de dos < n` por construccion, y el verificador exige
-//! consumir el camino **entero**: un camino con sobras o con faltas no
-//! pasa. Los cuatro vectores acumulados del borrador (`tests/vectors.rs`)
-//! lo comprueban para todos los subarboles de todos los arboles hasta 130
-//! hojas.
+//! ⚠️ **Generacion y verificacion comparten la misma particion** del
+//! arbol —`k = la mayor potencia de dos < n`— pero no la misma forma: la
+//! generacion es la recursion de RFC 9162 sobre un proveedor de hashes, y
+//! la verificacion es el recorrido iterativo por bits del borrador
+//! (`fn`, `sn`, `tn`), que no necesita el arbol. Lo que las ata es que el
+//! verificador exige consumir el camino **entero**: un camino con sobras o
+//! con faltas no pasa. Los cuatro vectores acumulados del borrador
+//! (`tests/vectors.rs`) lo comprueban para todos los subarboles de todos
+//! los arboles hasta 130 hojas, y los vectores grandes
+//! (`tests/large_vectors.rs`) para arboles de hasta 2^64-1.
 //!
 //! ## El proveedor de hashes
 //!

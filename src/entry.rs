@@ -32,6 +32,12 @@ pub const TBS_CERT_ENTRY: u16 = 1;
 /// Un `MTCLogEntry` no supera los 65535 bytes (compatibilidad tlog).
 pub const MAX_ENTRY_SIZE: usize = 65_535;
 
+/// Los tipos de extension de entrada que esta CA reconoce. **Hoy, ninguno**:
+/// el registro del borrador esta vacio, y «una CA MUST NOT firmar un
+/// subarbol que contenga una entrada con un `extension_type` que no
+/// reconoce». Cuando se defina uno, entra aqui con su semantica.
+pub const RECOGNIZED_EXTENSION_TYPES: &[u16] = &[];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryError {
     /// Las extensiones no van en orden estrictamente creciente de tipo.
@@ -40,6 +46,8 @@ pub enum EntryError {
     TooLong(&'static str, usize),
     /// Tipo de entrada no reconocido: una CA NO debe firmar lo que no entiende.
     UnknownType(u16),
+    /// Tipo de extension de entrada no reconocido: idem.
+    UnknownExtension(u16),
     Truncated,
     Der(DerError),
 }
@@ -169,6 +177,9 @@ impl MtcLogEntry {
 
     /// Lee una entrada cuya longitud total se conoce.
     pub fn decode(input: &[u8]) -> Result<Self, EntryError> {
+        if input.len() > MAX_ENTRY_SIZE {
+            return Err(EntryError::TooLong("MTCLogEntry", input.len()));
+        }
         let (extensions, rest) = decode_extensions(input)?;
         if rest.len() < 2 {
             return Err(EntryError::Truncated);
@@ -300,8 +311,15 @@ impl MtcLeaf {
         Ok(out)
     }
 
-    /// La entrada del log para esta hoja.
+    /// La entrada del log para esta hoja. Rechaza extensiones que no esten
+    /// en [`RECOGNIZED_EXTENSION_TYPES`]: la CA no las firmaria.
     pub fn log_entry(&self, extensions: Vec<LogEntryExtension>) -> Result<MtcLogEntry, EntryError> {
+        if let Some(e) = extensions
+            .iter()
+            .find(|e| !RECOGNIZED_EXTENSION_TYPES.contains(&e.extension_type))
+        {
+            return Err(EntryError::UnknownExtension(e.extension_type));
+        }
         Ok(MtcLogEntry::TbsCert {
             extensions,
             tbs_cert_entry_data: self.tbs_cert_entry_data()?,
@@ -385,6 +403,14 @@ mod tests {
         let ca = TrustAnchorId::from_ascii("32473.1").unwrap();
         let leaf = fixtures::leaf(&ca, "example.com", &[7u8; 32]);
         let entry = leaf.log_entry(vec![]).unwrap();
+        assert_eq!(
+            leaf.log_entry(vec![LogEntryExtension {
+                extension_type: 9,
+                extension_data: vec![]
+            }])
+            .err(),
+            Some(EntryError::UnknownExtension(9))
+        );
         let tbs = leaf.tbs_certificate((1u64 << 48) | 5).unwrap();
         let fields = der::parse_tbs(&tbs).unwrap();
         assert_eq!(

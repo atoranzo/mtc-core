@@ -2,6 +2,8 @@
 name = "mtc-core"
 version = "0.1.0"
 edition = "2021"
+# `u64::is_multiple_of` (1.87) es lo mas nuevo que se usa.
+rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 authors = ["Angel Toranzo Portela"]
 description = "Backend de una CA de Merkle Tree Certificates (draft-ietf-plants-merkle-tree-certs): log de emision, subarboles, pruebas de inclusion y cofirmas PQC. Semilla del fork de Arqueo sin STARK."
@@ -35,10 +37,14 @@ hbs-state = { git = "https://github.com/atoranzo/hbs-state", rev = "a960828bf0e8
 # el nucleo del arbol no depende de ninguna firma concreta.
 # ⚠️ Sin auditoria independiente, declarado por el propio crate.
 ml-dsa = { version = "0.1.1", optional = true }
+# La sal de las firmas ML-DSA con sal (FIPS 204, variante recomendada) y el
+# borrado de la semilla: solo con la feature `ml-dsa`.
+getrandom = { version = "0.4", optional = true }
+zeroize = { version = "1", optional = true }
 
 [features]
 default = ["ml-dsa"]
-ml-dsa = ["dep:ml-dsa"]
+ml-dsa = ["dep:ml-dsa", "ml-dsa/zeroize", "dep:getrandom", "dep:zeroize"]
 
 # El ejemplo firma con ML-DSA: sin la feature no compila, y se declara.
 [[example]]

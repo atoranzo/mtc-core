@@ -112,11 +112,14 @@ impl IssuanceLog {
         self.append_raw(entry.encode()?)
     }
 
-    /// Anade una entrada ya serializada.
+    /// Anade una entrada ya serializada. Se exige que sea una entrada
+    /// bien formada y de tipo conocido: **una CA no anota lo que no
+    /// entiende**, porque luego lo firmaria.
     pub fn append_raw(&mut self, entry: Vec<u8>) -> Result<u64, LogError> {
         if self.size() >= MAX_ENTRIES {
             return Err(LogError::Full);
         }
+        MtcLogEntry::decode(&entry)?;
         let index = self.size();
         self.levels[0].push(hash_leaf(&entry));
         self.entries.push(entry);
@@ -140,17 +143,22 @@ impl IssuanceLog {
 
     /// La entrada serializada en `index`.
     pub fn entry(&self, index: u64) -> Option<&[u8]> {
-        self.entries.get(index as usize).map(|v| v.as_slice())
+        self.entries
+            .get(usize::try_from(index).ok()?)
+            .map(|v| v.as_slice())
     }
 
     /// `MTH({entry})` de la entrada en `index`.
     pub fn leaf_hash(&self, index: u64) -> Option<HashValue> {
-        self.levels[0].get(index as usize).copied()
+        self.levels[0].get(usize::try_from(index).ok()?).copied()
     }
 
     /// El nodo completo `(nivel, indice)`, si existe.
     fn full_node(&self, level: usize, idx: u64) -> Option<HashValue> {
-        self.levels.get(level)?.get(idx as usize).copied()
+        self.levels
+            .get(level)?
+            .get(usize::try_from(idx).ok()?)
+            .copied()
     }
 
     /// El hash del checkpoint actual: `MTH(D[0:size])`.
@@ -224,8 +232,20 @@ mod tests {
     use super::*;
     use crate::subtree::{is_valid_subtree, LeafHashes};
 
+    /// Entradas nulas distintas: `null_entry` con una extension cuyo dato es `i`.
+    fn raw_entry(i: u64) -> Vec<u8> {
+        MtcLogEntry::Null {
+            extensions: vec![crate::entry::LogEntryExtension {
+                extension_type: 0,
+                extension_data: i.to_be_bytes().to_vec(),
+            }],
+        }
+        .encode()
+        .unwrap()
+    }
+
     fn both(n: u64) -> (IssuanceLog, LeafHashes) {
-        let entries: Vec<Vec<u8>> = (0..n).map(|i| vec![i as u8]).collect();
+        let entries: Vec<Vec<u8>> = (0..n).map(raw_entry).collect();
         let log = IssuanceLog::from_entries(1, entries.clone()).unwrap();
         let reference = LeafHashes(entries.iter().map(|e| hash_leaf(e)).collect());
         (log, reference)
@@ -269,8 +289,8 @@ mod tests {
     fn appending_one_by_one_equals_rebuilding() {
         let (rebuilt, _) = both(37);
         let mut incremental = IssuanceLog::new(1).unwrap();
-        for i in 0..37u8 {
-            incremental.append_raw(vec![i]).unwrap();
+        for i in 0..37u64 {
+            incremental.append_raw(raw_entry(i)).unwrap();
         }
         assert_eq!(incremental.root(), rebuilt.root());
         assert_eq!(incremental.cached_nodes(), rebuilt.cached_nodes());

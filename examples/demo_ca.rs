@@ -28,6 +28,8 @@ fn main() {
     println!("clave publica ML-DSA-44 de la CA: {} bytes", ca_key.len());
 
     // ⚠️ MemoryGuard NO persiste: en produccion, `hbs_state::IndexGuard::open(ruta)`.
+    // Las firmas ML-DSA llevan sal (variante recomendada de FIPS 204): dos
+    // ejecuciones dan certificados distintos que verifican igual.
     let cfg = CaConfig {
         ca_id: ca_id.clone(),
         log_number: 1,
@@ -35,7 +37,7 @@ fn main() {
     };
     let mut ca =
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();
-    ca.add_cosigner(Box::new(witness));
+    ca.add_cosigner(Box::new(witness)).unwrap();
 
     // ── 1-3a · solicitudes ya validadas entran en el log ──
     for i in 0..8u8 {
@@ -131,7 +133,7 @@ fn main() {
     let rp = RelyingPartyConfig {
         ca_id,
         cosigners,
-        required_cosigners: vec![TrustAnchorId::from_ascii("32473.1").unwrap(), witness_id],
+        required_cosigners: vec![witness_id], // la de la CA se exige siempre
         trusted_subtrees: trusted,
         revoked_ranges: vec![],
     };

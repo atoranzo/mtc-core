@@ -39,11 +39,15 @@ pub struct RelyingPartyConfig {
     /// Cada cofirmante reconocido con su verificador.
     pub cosigners: Vec<CosignerEntry>,
     /// La politica, en su forma mas simple: **todos** estos tienen que
-    /// haber cofirmado. Lo habitual: el cofirmante de la CA (autenticidad)
-    /// mas un quorum de testigos o espejos (transparencia).
+    /// haber cofirmado, **ademas del cofirmante de la CA**, que se exige
+    /// siempre (es la firma del certificado; el borrador dice que la parte
+    /// que confia SHOULD exigirla, y sin ella no hay autenticidad). Aqui van
+    /// los testigos o espejos que dan transparencia. Puede ir vacio.
     pub required_cosigners: Vec<TrustAnchorId>,
     pub trusted_subtrees: Vec<TrustedSubtree>,
-    /// Rangos `[start, end)` de numeros de serie revocados.
+    /// Rangos **inclusivos** `[min, max]` de numeros de serie revocados,
+    /// como `minSerial`/`maxSerial` del certificado de la CA: asi `2^64-1`
+    /// tambien es revocable.
     pub revoked_ranges: Vec<(u64, u64)>,
 }
 
@@ -82,8 +86,10 @@ pub enum VerifyError {
     UnknownIssuer,
     /// El subarbol es de confianza pero su hash no coincide.
     TrustedSubtreeMismatch,
-    /// La configuracion no exige ningun cofirmante: no hay nada que comprobar.
-    NoCosignerPolicy,
+    /// Un identificador derivado no cabe en el cable (CA ID demasiado largo).
+    Tai(crate::tai::TaiError),
+    /// El mensaje cofirmado no se pudo componer.
+    Cosign(String),
     MissingCosignature(TrustAnchorId),
     UnknownCosigner(TrustAnchorId),
     BadCosignature(TrustAnchorId),
@@ -102,7 +108,7 @@ impl std::error::Error for VerifyError {}
 macro_rules! from_error {
     ($($t:ty => $v:ident),*) => { $(impl From<$t> for VerifyError { fn from(e: $t) -> Self { VerifyError::$v(e) } })* };
 }
-from_error!(ProofError => Proof, DerError => Der, EntryError => Entry, SubtreeError => Subtree);
+from_error!(ProofError => Proof, DerError => Der, EntryError => Entry, SubtreeError => Subtree, crate::tai::TaiError => Tai);
 
 /// **Verifica un certificado MTC** en DER contra la configuracion, en el
 /// instante `now`.
@@ -121,7 +127,7 @@ pub fn verify_certificate(
     if cfg
         .revoked_ranges
         .iter()
-        .any(|(a, b)| *a <= serial && serial < *b)
+        .any(|(min, max)| *min <= serial && serial <= *max)
     {
         return Err(VerifyError::Revoked(serial));
     }
@@ -137,7 +143,7 @@ pub fn verify_certificate(
     if issuer != cfg.ca_id {
         return Err(VerifyError::UnknownIssuer);
     }
-    let log_id = cfg.ca_id.log_id(log_number);
+    let log_id = cfg.ca_id.log_id(log_number)?;
 
     // 7-9 · la entrada reconstruida y su hash.
     let entry_hash = hash_leaf(&entry_bytes_from_tbs(&fields, &cert.proof.extensions)?);
@@ -159,13 +165,14 @@ pub fn verify_certificate(
             }
             Basis::TrustedSubtree
         }
-        // 12 · …y si no, las cofirmas exigidas, cada una sobre el hash ESPERADO.
+        // 12 · …y si no, las cofirmas exigidas —la de la CA siempre—, cada
+        //      una sobre el hash ESPERADO. Las de cofirmantes no reconocidos
+        //      se ignoran, como manda el borrador.
         None => {
-            if cfg.required_cosigners.is_empty() {
-                return Err(VerifyError::NoCosignerPolicy);
-            }
+            let mut required: Vec<&TrustAnchorId> = vec![&cfg.ca_id];
+            required.extend(cfg.required_cosigners.iter().filter(|id| **id != cfg.ca_id));
             let mut used = Vec::new();
-            for id in &cfg.required_cosigners {
+            for id in required {
                 let sig = cert
                     .proof
                     .signatures
@@ -185,7 +192,10 @@ pub fn verify_certificate(
                     subtree,
                     subtree_hash: expected,
                 };
-                if !verifier.verify(&message.to_bytes(), &sig.signature) {
+                let bytes = message
+                    .to_bytes()
+                    .map_err(|e| VerifyError::Cosign(e.to_string()))?;
+                if !verifier.verify(&bytes, &sig.signature) {
                     return Err(VerifyError::BadCosignature(id.clone()));
                 }
                 used.push(id.clone());

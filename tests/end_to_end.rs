@@ -2,9 +2,10 @@
 //! con ML-DSA-44 en la CA y en un testigo.
 #![cfg(feature = "ml-dsa")]
 
+use mtc_core::ca::CaError;
 use mtc_core::cosign::mldsa::{MlDsa44, MlDsaCosigner, MlDsaVerifier};
 use mtc_core::der;
-use mtc_core::guard::{is_fatal, IndexGuard, Reconciliation};
+use mtc_core::guard::{is_fatal, GuardError, IndexGuard, Reconciliation};
 
 use mtc_core::proof::MtcCertificate;
 use mtc_core::verify::{
@@ -59,7 +60,7 @@ fn world() -> World {
     };
     let mut ca =
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();
-    ca.add_cosigner(Box::new(witness));
+    ca.add_cosigner(Box::new(witness)).unwrap();
     World {
         ca,
         ca_id,
@@ -83,7 +84,7 @@ fn rp(w: &World, trusted: Vec<TrustedSubtree>) -> RelyingPartyConfig {
     RelyingPartyConfig {
         ca_id: w.ca_id.clone(),
         cosigners,
-        required_cosigners: vec![w.ca_id.clone(), w.witness_id.clone()],
+        required_cosigners: vec![w.witness_id.clone()],
         trusted_subtrees: trusted,
         revoked_ranges: vec![],
     }
@@ -175,7 +176,7 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
     // Revocado por rango, caducado, aun no valido, emisor desconocido.
     let der = cert.to_der().unwrap();
     let mut revoked = rp(&w, vec![]);
-    revoked.revoked_ranges = vec![(1u64 << 48, (1u64 << 48) + 3)];
+    revoked.revoked_ranges = vec![(1u64 << 48, (1u64 << 48) + 2)]; // inclusivo: llega al 2
     assert_eq!(
         verify_certificate(&der, &revoked, NOW),
         Err(VerifyError::Revoked((1u64 << 48) | 2))
@@ -194,12 +195,159 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         verify_certificate(&der, &other_ca, NOW),
         Err(VerifyError::UnknownIssuer)
     );
-    let mut no_policy = rp(&w, vec![]);
-    no_policy.required_cosigners.clear();
+    // La cofirma de la CA se exige SIEMPRE, aunque la politica no la liste;
+    // y sin ella no hay certificado, tenga los testigos que tenga.
+    let mut only_ca = rp(&w, vec![]);
+    only_ca.required_cosigners.clear();
+    let v = verify_certificate(&der, &only_ca, NOW).unwrap();
+    assert_eq!(v.basis, Basis::Cosignatures(vec![w.ca_id.clone()]));
+    let mut without_ca = cert.clone();
+    without_ca
+        .proof
+        .signatures
+        .retain(|s| s.cosigner_id != w.ca_id);
     assert_eq!(
-        verify_certificate(&der, &no_policy, NOW),
-        Err(VerifyError::NoCosignerPolicy)
+        verify_certificate(&without_ca.to_der().unwrap(), &only_ca, NOW),
+        Err(VerifyError::MissingCosignature(w.ca_id.clone()))
     );
+    // Una cofirma de un ID desconocido (GREASE) se ignora, no invalida.
+    let mut greased = cert.clone();
+    greased.proof.signatures.push(mtc_core::SubtreeSignature {
+        cosigner_id: TrustAnchorId::from_binary(&[0x8f, 0xff, 0x7f]).unwrap(),
+        signature: vec![0xee; 7],
+    });
+    greased
+        .proof
+        .signatures
+        .sort_by(|a, b| a.cosigner_id.cmp(&b.cosigner_id));
+    assert!(verify_certificate(&greased.to_der().unwrap(), &cfg, NOW).is_ok());
+}
+
+/// Lo que la CA comprueba al entrar: validez, forma DER, extensiones de
+/// entrada; y lo que no admite al configurarse: IDs de cofirmante mal puestos.
+#[test]
+fn the_ca_refuses_what_it_could_not_certify() {
+    let mut w = world();
+    let bad_validity = CertificateRequest {
+        validity: Validity {
+            not_before: NOW,
+            not_after: NOW + WEEK + 1,
+        },
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(bad_validity),
+        Err(CaError::InvalidValidity { .. })
+    ));
+    let inverted = CertificateRequest {
+        validity: Validity {
+            not_before: NOW + 1,
+            not_after: NOW,
+        },
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(inverted),
+        Err(CaError::InvalidValidity { .. })
+    ));
+    let bad_subject = CertificateRequest {
+        subject: vec![0x04, 0x00],
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(bad_subject),
+        Err(CaError::InvalidDer {
+            field: "subject",
+            ..
+        })
+    ));
+    let bad_spki = CertificateRequest {
+        spki: vec![0x30, 0x00],
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(bad_spki),
+        Err(CaError::InvalidDer { field: "spki", .. })
+    ));
+    let bad_ext = CertificateRequest {
+        extensions: Some(vec![0x30, 0x00, 0x00]),
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(bad_ext),
+        Err(CaError::InvalidDer {
+            field: "extensions",
+            ..
+        })
+    ));
+    let unknown_ext = CertificateRequest {
+        log_entry_extensions: vec![mtc_core::LogEntryExtension {
+            extension_type: 1,
+            extension_data: vec![],
+        }],
+        ..request(1)
+    };
+    assert!(matches!(
+        w.ca.submit(unknown_ext),
+        Err(CaError::Entry(
+            mtc_core::entry::EntryError::UnknownExtension(1)
+        ))
+    ));
+    assert_eq!(w.ca.log().size(), 0, "nada de eso entro en el log");
+
+    // Un cofirmante externo con el ID de la CA, o repetido, no se admite.
+    let dup = MlDsaCosigner::<MlDsa44>::from_seed(w.ca_id.clone(), [9u8; 32]);
+    assert!(matches!(
+        w.ca.add_cosigner(Box::new(dup)),
+        Err(CaError::DuplicateCosigner(_))
+    ));
+    let again = MlDsaCosigner::<MlDsa44>::from_seed(w.witness_id.clone(), [9u8; 32]);
+    assert!(matches!(
+        w.ca.add_cosigner(Box::new(again)),
+        Err(CaError::DuplicateCosigner(_))
+    ));
+    // Y una CA cuyo cofirmante no lleva su ID no arranca.
+    let other = MlDsaCosigner::<MlDsa44>::from_seed(
+        TrustAnchorId::from_ascii("32473.2").unwrap(),
+        [9u8; 32],
+    );
+    let cfg = CaConfig {
+        ca_id: w.ca_id.clone(),
+        log_number: 1,
+        max_cert_lifetime: WEEK,
+    };
+    assert!(matches!(
+        CertificationAuthority::new(cfg, Box::new(other), MemoryGuard::default()),
+        Err(CaError::CosignerIdMismatch { .. })
+    ));
+}
+
+/// La caducidad de un landmark cubre el mayor `notAfter` de lo que tiene
+/// debajo, aunque sea posterior a `now + vida maxima`.
+#[test]
+fn a_landmark_never_expires_before_the_entries_it_covers() {
+    let mut w = world();
+    w.ca.submit(request(1)).unwrap();
+    // Una validez que empieza dentro de tres dias y dura una semana.
+    let future = CertificateRequest {
+        validity: Validity {
+            not_before: NOW + 3 * 86_400,
+            not_after: NOW + 10 * 86_400,
+        },
+        ..request(2)
+    };
+    w.ca.submit(future).unwrap();
+    w.ca.run_checkpoint_job(NOW).unwrap().unwrap();
+    let l = w.ca.allocate_landmark(NOW).unwrap().unwrap();
+    assert_eq!(l.expiry, NOW + 10 * 86_400, "no NOW + WEEK");
+    assert!(w.ca.landmarks().active(NOW + 9 * 86_400).next().is_some());
+    // Recortar los subarboles firmados de lo ya cubierto.
+    assert_eq!(w.ca.prune_signed_subtrees_below(2), 2);
+    assert!(matches!(
+        w.ca.standalone_certificate(1),
+        Err(CaError::NotYetCheckpointed(1))
+    ));
+    assert!(w.ca.landmark_relative_certificate(1).is_ok());
 }
 
 #[test]
@@ -286,12 +434,17 @@ fn the_checkpoint_number_is_persisted_before_signing() {
     let _ = std::fs::remove_file(&path);
     let guard = match IndexGuard::open(&path) {
         Ok(g) => g,
-        Err(e) => {
-            // tmpfs u otro sistema donde fsync no persiste: el guardian se
-            // niega, que es su trabajo; este test no puede medir ahi.
-            eprintln!("guardian no disponible en {}: {e}", path.display());
+        // tmpfs u otro sistema donde fsync no persiste: el guardian se
+        // niega, que es su trabajo; este test no puede medir ahi, y lo dice.
+        // Cualquier OTRO error es un fallo del test.
+        Err(GuardError::FakePersistence { ratio, .. }) => {
+            eprintln!(
+                "SALTADO: fsync no persiste en {} (ratio {ratio})",
+                path.display()
+            );
             return;
         }
+        Err(e) => panic!("no se pudo abrir el guardian en {}: {e}", path.display()),
     };
     let ca_id = TrustAnchorId::from_ascii("32473.1").unwrap();
     let signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id.clone(), [3u8; 32]);

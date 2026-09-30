@@ -14,9 +14,19 @@
 //!    que va a firmar ANTES de firmarlo. Si el proceso muere entre medias,
 //!    el numero queda huerfano (caso normal, `CounterAhead`); si al
 //!    arrancar el diario del log va por delante del contador (`KeyAhead`),
-//!    alguien firmo sin pasar por el guardian y **no se arranca**. Es la
-//!    misma regla que impide a XMSS reutilizar una hoja, aplicada a
-//!    «nunca dos vistas del log bajo el mismo numero».
+//!    alguien firmo sin pasar por el guardian y **no se arranca**.
+//!
+//!    ⚠️ **Lo que protege, dicho con precision:** el numero NO entra en el
+//!    mensaje firmado (el `CosignedMessage` del borrador no tiene sitio para
+//!    el), asi que el guardian **no impide** que la CA firme dos vistas
+//!    distintas del log: eso lo detectan los testigos con pruebas de
+//!    consistencia, y es su papel. Lo que el guardian da es un **registro
+//!    duradero, anterior a cada firma**, con el que al arrancar se sabe
+//!    cuantas firmas de checkpoint pudieron salir y cuantas anoto el diario,
+//!    para reconstruir el log hasta un estado que las cubra y no publicar
+//!    una vista incoherente por descuido. Es el mismo invariante que en XMSS
+//!    y la misma reconciliacion; lo que cambia es la consecuencia de
+//!    romperlo: alli se filtra una clave, aqui se pierde la confianza.
 //! 2. **El indice de firma**, si el cofirmante de la CA es XMSS/LMS: ahi
 //!    se usa tal cual, como en `FirmanteCabeza`.
 //!

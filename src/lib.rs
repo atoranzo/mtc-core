@@ -41,11 +41,13 @@
 //! ## Lo que este crate NO promete todavia
 //!
 //! Es un **esqueleto verificado**: los algoritmos del arbol pasan los cuatro
-//! vectores acumulados del borrador (`tests/vectors.rs`) y hay un flujo de
-//! emision y verificacion de extremo a extremo con ML-DSA-44
-//! (`tests/end_to_end.rs`). No esta auditado, no persiste el log a disco
-//! (solo el contador del guardian) y los OID son los experimentales del
-//! arco 1.3.6.1.4.1.44363.47 que el borrador reserva para eso.
+//! vectores acumulados del borrador (`tests/vectors.rs`, 65.058 casos) y
+//! los vectores grandes de su apendice (`tests/large_vectors.rs`, arboles
+//! de hasta 2^64-1 hojas), y hay un flujo de emision y verificacion de
+//! extremo a extremo con ML-DSA-44 (`tests/end_to_end.rs`). No esta
+//! auditado, no persiste el log a disco (solo el contador del guardian) y
+//! los OID son los experimentales del arco 1.3.6.1.4.1.44363.47 que el
+//! borrador reserva para eso.
 
 pub mod ca;
 pub mod cosign;

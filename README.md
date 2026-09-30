@@ -77,8 +77,8 @@ el orden: la CA **certifica anotando en su log** y firma **un checkpoint y dos
 subárboles por ciclo**, no un certificado por solicitud. Un certificado es
 entonces una prueba de inclusión de `ceil(log2(n))` hashes de 32 bytes, más las
 cofirmas —o **ninguna**, si el cliente ya tiene el subárbol como *landmark*
-predistribuido—. Medido con el ejemplo de este directorio (sección 4.4): 5.095
-bytes el certificado *standalone* con dos cofirmas ML-DSA-44, **271 bytes** el
+predistribuido—. Medido con el ejemplo de este directorio (sección 4.4): 5.098
+bytes el certificado *standalone* con dos cofirmas ML-DSA-44, **274 bytes** el
 relativo a *landmark* de la misma entrada.
 
 ### 1.1 Cronología verificada: de dónde viene la urgencia
@@ -185,7 +185,7 @@ Aplicado a una CA de MTC en dos sitios:
 
 | dónde | qué guarda | por qué es el mismo invariante |
 |---|---|---|
-| `ca::run_checkpoint_job`, paso 0 | **el número de checkpoint**, reservado con `IndexGuard::reserve` (persistido con `fsync`) **antes** de firmar | Si el proceso muere entre firmar un checkpoint y persistir el log, al reiniciar existiría en el mundo una vista firmada que el log ya no puede reproducir: es una *split view*, y los testigos la detectan. Persistir antes de firmar convierte ese caso en un número huérfano (`CounterAhead`, el caso normal tras una caída) en vez de en una firma inconsistente. Al arrancar, `SequenceGuard::reconcile` compara con el diario: solo `KeyAhead` es fatal. |
+| `ca::run_checkpoint_job`, paso 0 | **el número de checkpoint**, reservado con `IndexGuard::reserve` (persistido con `fsync`) **antes** de firmar | Lo que da, dicho con precisión: un contador que sobrevive a la caída y un diagnóstico al arrancar. Si el proceso muere entre reservar y firmar, el número queda huérfano (`CounterAhead`, el caso normal); si al arrancar el diario del log va por delante del contador (`KeyAhead`), alguien firmó sin pasar por el guardián y la CA no arranca. **Lo que no da:** el número no entra en el `CosignedMessage` (el borrador no tiene sitio para él), así que el guardián no impide por sí solo que una CA publique dos vistas del log; eso lo detectan los testigos con pruebas de consistencia. Evitar la vista partida por descuido exige el orden completo de la fase 1: persistir las entradas con `fsync`, reservar, firmar. |
 | el cofirmante de la CA, si es XMSS/LMS | **el índice de firma**, como en `FirmanteCabeza` | La CA firma un checkpoint y dos subárboles por ciclo, no un certificado por solicitud: es el ritmo al que una firma con estado es viable. |
 
 `IndexGuard::open` mide su propio `fsync` y se niega en `tmpfs`; el test de
@@ -282,11 +282,16 @@ pub struct CosignedMessage {
 pub struct RelyingPartyConfig {
     pub ca_id: TrustAnchorId,
     pub cosigners: Vec<(TrustAnchorId, Box<dyn CosignatureVerifier>)>,
-    pub required_cosigners: Vec<TrustAnchorId>,   // la CA + un quórum de testigos
+    pub required_cosigners: Vec<TrustAnchorId>,   // testigos/espejos; la CA se exige siempre
     pub trusted_subtrees: Vec<TrustedSubtree>,    // landmarks predistribuidos
-    pub revoked_ranges: Vec<(u64, u64)>,          // por número de serie
+    pub revoked_ranges: Vec<(u64, u64)>,          // [min, max] inclusivos, como minSerial/maxSerial
 }
 ```
+
+La cofirma de la CA se exige siempre (es la firma del certificado); las de
+cofirmantes que la configuración no reconoce —GREASE incluido— se ignoran,
+como manda el borrador, y un ID de cualquier forma se decodifica sin
+interpretarlo.
 
 ---
 
@@ -331,9 +336,9 @@ En código, el ciclo completo cabe en una pantalla (`examples/demo_ca.rs`):
 
 ```rust
 let mut ca = CertificationAuthority::new(cfg, Box::new(ca_signer), IndexGuard::open(ruta)?)?;
-ca.add_cosigner(Box::new(witness));
+ca.add_cosigner(Box::new(witness))?;
 
-let i = ca.submit(request)?;                      // 3a · al log
+let i = ca.submit(request)?;                      // 3a · comprobar y anotar en el log
 let cp = ca.run_checkpoint_job(now)?;             // 0-4 · reservar, firmar, cubrir, cofirmar
 let standalone = ca.standalone_certificate(i)?;   // 5  · prueba + cofirmas
 let der = standalone.to_der()?;                   // X.509 con id-alg-mtcProof
@@ -370,12 +375,14 @@ mismo hash y las mismas pruebas que la recursión literal de RFC 9162.
 
 | | subárbol | hashes | cofirmas | bytes DER |
 |---|---|---|---|---|
-| *standalone* de la entrada 6 | `[6, 8)` | 1 | 2 (CA + testigo, ML-DSA-44) | 5.095 |
-| relativo al *landmark* 1 de la misma entrada | `[4, 8)` | 2 | 0 | **271** |
+| *standalone* de la entrada 6 | `[6, 8)` | 1 | 2 (CA + testigo, ML-DSA-44) | 5.098 |
+| relativo al *landmark* 1 de la misma entrada | `[4, 8)` | 2 | 0 | **274** |
 
 Una clave pública ML-DSA-44 mide 1.312 bytes y una firma 2.420: el
 *standalone* es casi todo firmas, y por eso el borrador insiste en que las
-partes que confían negocien cofirmantes en vez de exigirlos todos.
+partes que confían negocien cofirmantes en vez de exigirlos todos. Las
+firmas llevan sal (la variante *hedged* que FIPS 204 recomienda), así que
+dos ejecuciones del ejemplo dan bytes distintos que verifican igual.
 
 ---
 
@@ -388,8 +395,8 @@ partes que confían negocien cofirmantes en vez de exigirlos todos.
 | `log` | `IssuanceLog`: *append-only*, nodos completos en caché, `from_entries` para arrancar | la idea de `zk-ssl::sparse_tree` |
 | `entry` | `MtcLeaf`, `MtcLogEntry`, `LogEntryExtension`, `Validity`, `entry_bytes_from_tbs` | nuevo |
 | `der` | lo mínimo de DER/X.509: TLV, INTEGER, OID, tiempos, el `Name` del CA ID, `parse_tbs`, `parse_certificate` | nuevo |
-| `tai` | `TrustAnchorId`: ASCII, binario, `oid/…`, IDs de log/landmark/grupo, orden canónico | nuevo |
-| `cosign` | `CosignedMessage`, `Cosigner`, `CosignatureVerifier`, `SignedSubtree`; `mldsa::{MlDsaCosigner, MlDsaVerifier}` | `firma_cabeza` |
+| `tai` | `TrustAnchorId`: guarda la forma binaria, tolera en el cable cualquier ID bien formado (GREASE), estricto con lo que teclea un operador; ASCII de precisión arbitraria, `oid/…`, IDs de log/landmark/grupo, orden canónico | nuevo |
+| `cosign` | `CosignedMessage` (con sus reglas: sello de tiempo solo en checkpoints), `Cosigner`, `CosignatureVerifier`, `SignedSubtree`; `mldsa::{MlDsaCosigner, MlDsaVerifier}` con firma con sal por defecto, borrado de la semilla y el *key ID* de `tlog-cosignature` | `firma_cabeza` |
 | `guard` | `SequenceGuard` sobre `hbs_state::IndexGuard`; `MemoryGuard` solo para tests | `hbs-state` |
 | `landmark` | `LandmarkSequence`: asignar, subárboles de cada landmark, activos, publicar | nuevo |
 | `proof` | `MtcProof` (codificación TLS) y `MtcCertificate` (DER) | `zk-ssl-verify::inclusion` |
@@ -399,21 +406,35 @@ partes que confían negocien cofirmantes en vez de exigirlos todos.
 Cómo se prueba, en tres capas:
 
 - **Contra el borrador**: `tests/vectors.rs` reproduce los cuatro vectores
-  acumulados del apéndice de test (hashes de subárbol, pruebas de inclusión,
-  pruebas de consistencia, subárboles de cobertura), que cubren todos los
-  subárboles de todos los árboles hasta 130 hojas, más los casos grandes de
-  validez y cobertura hasta `2^64-1`. Incluye el ejercicio que el borrador
-  pide al verificador: cada prueba evaluada, y rechazada al recortarla,
-  alargarla o cambiar un bit.
+  acumulados del apéndice de test (712 hashes de subárbol, 12.807 pruebas de
+  inclusión, 42.893 de consistencia y 8.646 coberturas: todos los subárboles
+  de todos los árboles hasta 130 hojas), más los casos de validez y cobertura
+  hasta `2^64-1`; y `tests/large_vectors.rs` evalúa los 24 vectores de
+  inclusión y 21 de consistencia que el repositorio del borrador publica para
+  árboles de `2^48-1`, `2^63-1` y `2^64-1` hojas, con un lector de JSON y
+  base64 escrito a mano. Incluye el ejercicio que el borrador pide al
+  verificador: cada prueba evaluada, y rechazada al recortarla o alargarla en
+  un hash (y en un byte, a nivel de `MTCProof`), y con un bit cambiado en el
+  camino o en los hashes de subárbol y de árbol.
 - **Contra sí mismo**: la caché de `IssuanceLog` frente a la recursión de
   referencia; la entrada que la CA anota frente a la que el verificador
-  reconstruye; el `MTCProof` codificado frente al decodificado.
+  reconstruye; el `MTCProof` codificado frente al decodificado, con orden
+  canónico exigido también al decodificar; el DER malformado (longitudes que
+  desbordan, indefinidas, no mínimas, fechas imposibles) rechazado sin pánico.
 - **De extremo a extremo**: `tests/end_to_end.rs` emite con ML-DSA-44 en la CA
   y en un testigo, verifica *standalone* y relativo a *landmark*, y comprueba
-  que fallan la manipulación del SAN, la cofirma ausente, la prueba de otro
-  índice, la revocación por rango, la caducidad y el emisor desconocido; y
-  abre un `IndexGuard` real en disco para comprobar que el número de checkpoint
-  sobrevive al proceso y se reconcilia.
+  que fallan la manipulación del SAN, la cofirma ausente (de la CA o del
+  testigo), la prueba de otro índice, la revocación por rango, la caducidad y
+  el emisor desconocido, que una cofirma GREASE se ignora, que la CA rechaza
+  validez fuera de cota, DER mal formado, extensiones de entrada desconocidas
+  y cofirmantes repetidos, y que un landmark no caduca antes que sus entradas;
+  y abre un `IndexGuard` real en disco para comprobar que el número de
+  checkpoint sobrevive al proceso y se reconcilia (si el sistema de ficheros
+  no persiste, el test lo dice y se salta; cualquier otro error lo hace fallar).
+- **Contra la implementación de referencia**: los formatos de `CosignedMessage`,
+  `MTCProof` y `TBSCertificateLogEntry` se cotejaron a mano con `demo/` del
+  repositorio del borrador (Go); no hay todavía un test automático de
+  interoperabilidad (sección 7).
 
 ---
 
@@ -424,10 +445,14 @@ pruebas, entradas, cofirmas, landmarks, CA en memoria y verificador. Hecho.
 
 **Fase 1 — persistencia y arranque.** Un almacén *append-only* de entradas
 (fichero con `fsync` por checkpoint, o `sled` como en `zk-ssl::persistence`),
-`IssuanceLog::from_entries` al arrancar, y la reconciliación
-`guard.reconcile(último_checkpoint_del_diario)` con la política de Arqueo: solo
-`KeyAhead` impide arrancar. Medir el arranque con un millón de entradas, como
-hizo el banco B.4 de Arqueo.
+con el orden que evita la vista partida: **entradas persistidas con `fsync`,
+número reservado, firma**. `IssuanceLog::from_entries` al arrancar, un
+constructor de la CA desde el almacén (hojas, tamaño del último checkpoint,
+landmarks) y la reconciliación `guard.reconcile(último_checkpoint_del_diario)`
+con la política de Arqueo: solo `KeyAhead` impide arrancar. Recorte de
+`signed_subtrees` con `prune_signed_subtrees_below` cuando un landmark cubre
+lo firmado. Medir el arranque con un millón de entradas, como hizo el banco
+B.4 de Arqueo.
 
 **Fase 2 — la entrada real.** Parseo de CSR PKCS#10 y construcción de
 `Name`/`Extensions` con `x509-cert`; validación de dominio y prueba de posesión
@@ -436,11 +461,15 @@ por ACME (RFC 8555) con la extensión del borrador (el enlace
 crate no cambia: recibe `CertificateRequest`.
 
 **Fase 3 — el log hacia fuera.** Servir el log con tlog-tiles según el perfil
-MTC de C2SP, y pedir cofirmas a testigos reales con el protocolo tlog-witness:
-el `CosignedMessage` de aquí ya lleva la etiqueta y el `log_origin` que ese
-protocolo espera; queda alinear el nombre de clave y el *key id* de
-TLOG-COSIGNATURE para ML-DSA-44. Los `consistency_proof` de `subtree` son lo
-que un testigo comprueba antes de cofirmar.
+`mtc-tlog` de C2SP (checkpoint firmado por la CA como nota, `landmarks` en
+texto, prefijo de URL por log), y pedir cofirmas a testigos reales con el
+protocolo tlog-witness. El `CosignedMessage` de aquí es byte a byte el
+`cosigned_message` de `tlog-cosignature` para ML-DSA-44, y `MlDsaCosigner`
+ya calcula el *key ID* y la `timestamped_signature` de la línea de nota;
+queda el formato de nota completo (`signed-note`), el cliente HTTP del
+testigo (`add-checkpoint`, `sign-subtree`) y la comprobación de las
+pruebas de consistencia que el testigo exige, que `subtree` ya sabe
+generar y verificar.
 
 **Fase 4 — la CA como ancla de confianza.** El certificado de la CA con la
 extensión `MTCCertificationAuthority { sigAlg, minSerial, maxSerial }`; un
@@ -461,17 +490,23 @@ por versión, un asiento por cambio) y nada del código STARK.
   crate), ni `hbs-state`. Los OID son los experimentales del arco
   `1.3.6.1.4.1.44363.47` que el borrador reserva para eso, y el borrador puede
   cambiar: la versión leída es la del repositorio de trabajo del grupo PLANTS
-  a 29 de septiembre de 2026.
+  a 29 de septiembre de 2026. Sí pasó una revisión adversarial interna (seis
+  revisores por dimensión, un escéptico por hallazgo) contra el borrador, la
+  implementación de referencia y las especificaciones C2SP; lo confirmado
+  está corregido y cubierto por tests, y no sustituye a una auditoría.
 - **No hay interoperabilidad medida** con otra implementación. La
-  implementación pública en Go de Cloudflare avisa de que sigue el diseño
-  anterior de lotes; los cuatro vectores acumulados del borrador son la única
-  referencia externa que este código pasa.
+  implementación en Go de Cloudflare (`bwesterb/mtc`) sigue el diseño anterior
+  de lotes; el directorio `demo/` del repositorio del borrador sí implementa
+  el diseño actual (un generador y un verificador en Go), es el objetivo
+  natural de interoperabilidad, y de él salen los vectores grandes que
+  `tests/large_vectors.rs` pasa. Los formatos se cotejaron leyendo su código;
+  no se ha ejecutado todavía un certificado de aquí contra su verificador.
 - **No hay validación de solicitudes**: `CertificateRequest` llega validada.
   Certificar lo que llega es de este crate; que sea verdad, del operador.
 - **No persiste el log**, solo el contador del guardián. Y `MemoryGuard`
   existe para poder medir sin disco: una CA que arranque con él reutiliza
   números de checkpoint tras cada caída.
-- **La política de cofirmantes es la mínima** («todos estos»). Quórums,
+- **La política de cofirmantes es la mínima** («la CA y todos estos»). Quórums,
   negociación de cofirmantes en TLS y espejos quedan para la fase 3.
 - **No está medido a escala.** La caché es O(log n) por construcción, pero
   los tiempos con millones de entradas no se han medido, y en Arqueo esa
