@@ -1,0 +1,7 @@
+/target
+**/target/
+*.bin
+*.key
+*.pem
+secrets
+.env
