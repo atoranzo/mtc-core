@@ -50,3 +50,9 @@ ml-dsa = ["dep:ml-dsa", "ml-dsa/zeroize", "dep:getrandom", "dep:zeroize"]
 [[example]]
 name = "demo_ca"
 required-features = ["ml-dsa"]
+
+# The interoperability tool against the draft's reference implementation
+# (`interop/README.md`): it signs and verifies with ML-DSA.
+[[example]]
+name = "interop"
+required-features = ["ml-dsa"]

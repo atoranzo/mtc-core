@@ -368,3 +368,112 @@ README, section 7.
 
 **Lesson.** A record that says "the author's machine" has to have the
 author's machine in it.
+
+## §14 · Interoperability with the draft's reference implementation, measured in both directions
+
+**Commit** the one that adds this entry · 2026-09-30 · branch `interop`, for the author's review; not `main`
+
+**Where it departs from the method, declared.** This entry is written by
+the assistant, in a session that ran the gates and pushes a review branch,
+as GENAI.md says such a departure is to be declared. The author's own run of
+`interop/run.sh` on his machine is not here; when he runs it, it is its own
+entry, as §13 was for the gates.
+
+**What changed.** Three library modules, one example, one test corpus and
+one directory:
+
+- `src/pem.rs`: PEM (RFC 7468) and base64, strict, no dependency. Needed
+  because the reference tool speaks files, not bytes.
+- `src/spki.rs`: `SubjectPublicKeyInfo` parse and compose; the ML-DSA OIDs
+  of RFC 9881. Needed to read a cosigner's key from a CA certificate or a
+  policy line and to publish ours.
+- `src/cacert.rs`: `CaCertificate`, the certificate of the section
+  "Representing Certification Authorities": written unsigned (RFC 9925) as
+  the tool writes it, read from any implementation, and fail-closed on
+  what the draft states as MUST (critical MTC extension, `keyCertSign`,
+  `cA = TRUE`, serials within `mtcMinSerial..mtcMaxSerial`). Under
+  `ml-dsa`, its key becomes a relying party's `CosignerEntry`.
+- `src/cosign.rs`: the tlog key ID computation moved into
+  `tlog_key_id_for`, one definition for the cosigner and for whoever checks
+  a checkpoint line; `MlDsaVerifier::verifying_key_bytes`.
+- `examples/interop.rs`: `generate`, `verify` and `checkpoint`, in the
+  shape of the tool's own `generate` and `verify`, reading and writing its
+  policy vocabulary. Its CA uses the tool's public ML-DSA-44 test seed for
+  `32473.1`, so that the two CAs share one key.
+- `tests/vectors/interop-plants-07/`: the tool's output over its own
+  `mtc.json` with `"Version": "plants-07"` (26 certificates, five deliberate
+  negatives; the log of 2122 entries as tiles; its signed checkpoint) and
+  the verdicts its verifier gave; `tests/interop_corpus.rs` requires the
+  same verdicts here and reproduces the checkpoint from the tiles.
+- `interop/README.md` and `interop/run.sh`: the procedure, both directions,
+  with the comparisons scripted.
+
+**Two corrections to what this crate said of itself.** The README called
+its target "`-06` plus the working repository as of 2026-09-29" without
+saying that the working copy's `id-alg-mtcProof` OID (`…47.5`) is what the
+repository's `draft_oids.md` assigns to `plants-07`; with the tool's default
+`-version plants-06` (OID `…47.0`) every certificate from here is rejected
+by design. The README now says `plants-07`, and so do the procedure and the
+corpus. And the plan's phase 4 listed the CA certificate as future work; it
+is done to the extent above.
+
+**What was measured, and with what.** Go 1.27.1 built from the `go1.27.1`
+tag of `golang/go` on GitHub (go.dev is not reachable from the session's
+container), bootstrapped with the container's Go 1.24.7; the reference tool
+at commit `99097c9e0af9641a85311b68f7642978b882d385` (2026-09-29) built with
+`golang.org/x/crypto` v0.54.0's `cryptobyte` copied in as an internal
+package (the module proxy is not reachable either; the code is unchanged,
+only its import path). rustc 1.94.1, cargo 1.94.1. The container is Linux
+x86_64. Results, all reproducible with `interop/run.sh`:
+
+1. Go → Rust: 26 of 26 verdicts equal (21 OK, 5 FAIL). The five negatives
+   fail here for the reason they were built for: `UnusedBit` at the DER
+   (`BadLength`), `BitFlipProof` at the CA's cosignature or at the trusted
+   subtree's hash, the two without the CA's cosignature at
+   `MissingCosignature`.
+2. Rust → Go: 9 of 9 verdicts as expected (5 OK, 4 FAIL), with this crate's
+   CA certificate and again with the tool's own CA certificate. The witness
+   `32473.3.1`'s SPKI line written here is byte-identical to the tool's
+   `policy.txt` line: FIPS 204 key generation from the same seed agrees.
+3. The log: 2122 entries read from the tool's tiles rebuild to the
+   checkpoint's root; the tool's origin line equals the log ID derived
+   here from the CA ID and log number; the CA's signature line carries the
+   `tlog-cosignature` key ID computed here.
+
+**Two findings for the working group, not for this crate.** (a) The tool's
+signed `checkpoint` line is `key_id || signature` over the subtree
+`[0, size)` with timestamp zero: it verifies here in that form and not as a
+`tlog-cosignature` line (`key_id || timestamp || signature`, timestamp in
+the message). The draft only requires the *signature* format to be
+compatible; whether the demo's checkpoint is meant to be consumable by a
+tlog witness is a question. (b) The tool's sample `policy.txt` carries six
+`trusted-subtree` lines whose hashes match neither its `plants-07` nor its
+`plants-06` output over its own `mtc.json` (the landmark hashes are the
+same in both, as the entry does not contain the proof OID); with that
+sample, the tool rejects its own landmark-relative certificates
+("trusted subtree hash mismatch"). The six correct lines are in
+`tests/vectors/interop-plants-07/policy.txt`.
+
+**One correction to this entry's own first draft.** The first version of
+`generate` put the standalone negatives on entry 9, whose standalone subtree
+`[8, 11)` is also landmark 1's second subtree: the Go verifier accepted the
+certificate with no cosignatures because the subtree was trusted, as the
+procedure says it should. The negatives moved to entry 17, whose subtree no
+landmark covers. The expected verdicts were wrong, not the verifier.
+
+**Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo
+clippy --all-targets`: 0 warnings · `cargo test --release`: 66/0
+(passed/failed; 51 before, plus 11 unit tests of the three modules and the
+4 of `tests/interop_corpus.rs`) · without `ml-dsa`: 53/0 (43 before, plus
+10; the corpus test needs ML-DSA).
+
+**What it does not close.** The author's run on his machine (§13's rule).
+One implementation only; ECDSA and Ed25519 cosigners are ignored here, not
+verified; the tool's cosigner groups are not expressible in this crate's
+minimal policy, and `interop verify` says so line by line instead of
+pretending. Nothing here is an audit.
+
+**Lesson.** A version name is a format decision: "written against the
+working copy" was true and still named the wrong `-version`. The
+interoperability run found no format bug in the crate and two in what the
+crate said about itself; that is what the run is for.

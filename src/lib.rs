@@ -37,19 +37,27 @@
 //! | [`ca`] | the end-to-end CA flow | `zk-ssl-node` (`latido` heartbeat + head signature) |
 //! | [`verify`] | the relying party's verifier | `zk-ssl-verify` (without compiling the issuer) |
 //! | [`der`] | the minimum of DER/X.509 that is needed | new |
+//! | [`cacert`] | the CA's own certificate (subject = CA ID, the MTC CA extension), unsigned | new; interoperability with the draft's `demo/` |
+//! | [`spki`] | `SubjectPublicKeyInfo` of cosigner keys, ML-DSA OIDs of RFC 9881 | new |
+//! | [`pem`] | PEM and base64, strict, without dependencies | new |
 //!
 //! ## What this crate does NOT promise yet
 //!
 //! It is a **verified skeleton**: the tree algorithms pass the four
 //! accumulated vectors of the draft (`tests/vectors.rs`, 65,058 cases) and
 //! the large vectors of its appendix (`tests/large_vectors.rs`, trees of up
-//! to 2^64-1 leaves), and there is an end-to-end issuance and verification
-//! flow with ML-DSA-44 (`tests/end_to_end.rs`). It is not audited, it does
-//! not persist the log to disk (only the guard's counter), and the OIDs are
-//! the experimental ones from the 1.3.6.1.4.1.44363.47 arc that the draft
-//! reserves for that purpose.
+//! to 2^64-1 leaves), there is an end-to-end issuance and verification
+//! flow with ML-DSA-44 (`tests/end_to_end.rs`), and the reference
+//! implementation's corpus (Go, `demo/` in the draft's repository,
+//! `-version plants-07`) verifies here with the same verdicts it gets
+//! there, negatives included (`tests/interop_corpus.rs`; the other
+//! direction is `interop/run.sh`, which needs Go). It is not audited, it
+//! does not persist the log to disk (only the guard's counter), and the
+//! OIDs are the experimental ones from the 1.3.6.1.4.1.44363.47 arc that
+//! the draft reserves for that purpose.
 
 pub mod ca;
+pub mod cacert;
 pub mod cosign;
 pub mod der;
 pub mod entry;
@@ -57,12 +65,15 @@ pub mod guard;
 pub mod hash;
 pub mod landmark;
 pub mod log;
+pub mod pem;
 pub mod proof;
+pub mod spki;
 pub mod subtree;
 pub mod tai;
 pub mod verify;
 
 pub use ca::{CaConfig, CertificateRequest, CertificationAuthority, Checkpoint};
+pub use cacert::CaCertificate;
 pub use cosign::{
     CosignError, CosignatureVerifier, CosignedMessage, Cosigner, SignedSubtree, SubtreeSignature,
 };

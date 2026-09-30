@@ -1,4 +1,6 @@
-# The draft's large vectors
+# Vectors from the draft's repository
+
+## The large vectors
 
 `large_inclusion_proofs.json` and `large_consistency_proofs.json` are the
 files that the appendix "Large Subtree Test Vectors" of
@@ -12,7 +14,18 @@ evaluate them with 64-bit integers without overflowing.
 `tests/large_vectors.rs` reads them with a hand-written JSON and base64
 reader, so that `serde` does not sneak in through the back door.
 
-## License of these two files
+## The reference implementation's corpus
+
+`interop-plants-07/` is what the same repository's `demo` tool generated,
+at the same commit, from its own `mtc.json` with `"Version": "plants-07"`:
+a CA certificate, 26 certificates (five deliberately broken), the log as
+tlog-tiles with its signed `checkpoint`, plus the verdict the Go verifier
+gave each certificate. Its own README has the provenance and the commands;
+`tests/interop_corpus.rs` reads it. The `mtc.json` and the `cosigner` lines
+of `policy.txt` are copied from that repository; the rest is its tool's
+output over them, kept under the same terms.
+
+## License of these files
 
 The repository they come from declares that all of its material consists of
 contributions to the IETF standardization process (BCP 78, BCP 79 and the

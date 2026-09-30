@@ -13,8 +13,9 @@ standalone Cargo workspace with three dependencies (`sha2`, `ml-dsa`,
 `hbs-state`) and no zero-knowledge machinery.
 
 ```bash
-cargo test --release              # draft vectors + end-to-end flow
+cargo test --release              # draft vectors + end-to-end flow + the reference implementation's corpus
 cargo run --release --example demo_ca
+DEMO_DIR=/path/to/merkle-tree-certs/demo interop/run.sh /tmp/mtc-interop   # both directions against the Go tool
 ```
 
 What running that verifies, and what it does not, is in section 7.
@@ -147,7 +148,7 @@ so row by row.
 | 2026-02-18 | Adoption: `draft-ietf-plants-merkle-tree-certs-00` | git tag | confirmed |
 | 2026-02-27 | Google Security Blog, "Cultivating a robust and efficient quantum-safe HTTPS": MTC *bootstrapping* in the first quarter of 2027 and the *Chrome Quantum-resistant Root Store* in the third; no post-quantum X.509 in Chrome's root store | security.googleblog.com | confirmed |
 | 2026-06-03 | Let's Encrypt, "A Post-Quantum Future for Let's Encrypt": MTC in *staging* at the end of 2026, production in 2027 | letsencrypt.org | confirmed |
-| 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`, the version this crate is written against (plus the working repository as of 2026-09-29) | git tag | confirmed |
+| 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`; this crate is written against the working repository as of 2026-09-29, whose OIDs (`…47.5` for `id-alg-mtcProof`) are the ones its `draft_oids.md` assigns "starting draft plants-07": the reference tool's `-version plants-07` | git tag | confirmed |
 | 2026-09-29 | Cloudflare announces its public CA and "Building a post-quantum certificate authority with Merkle Tree Certificates": experiment with 50 % of Chrome Beta 146, first MTCs in the first quarter of 2027 | blog.cloudflare.com | confirmed (day from snippets) |
 | 2026-09-29 | Spanish press coverage of the Cloudflare announcement; the 20minutos headline matches that hook | infobae.com (same day) | unverified |
 
@@ -436,6 +437,9 @@ give different bytes that verify the same.
 | `log` | `IssuanceLog`: *append-only*, complete nodes cached, `from_entries` for startup | the idea of `zk-ssl::sparse_tree` |
 | `entry` | `MtcLeaf`, `MtcLogEntry`, `LogEntryExtension`, `Validity`, `entry_bytes_from_tbs` | new |
 | `der` | the bare minimum of DER/X.509: TLV, INTEGER, OID, times, the CA ID's `Name`, `parse_tbs`, `parse_certificate` | new |
+| `cacert` | `CaCertificate`: the CA's own certificate (subject = CA ID, the cosigner's key, the critical `MTCCertificationAuthority` extension, key usage and basic constraints), written unsigned (RFC 9925) and read from any implementation | new |
+| `spki` | `SubjectPublicKeyInfo` of cosigner keys: parse, compose, the ML-DSA OIDs of RFC 9881 | new |
+| `pem` | PEM (RFC 7468) and strict base64, without dependencies | new |
 | `tai` | `TrustAnchorId`: stores the binary form, tolerates any well-formed ID on the wire (GREASE), strict with what an operator types; arbitrary-precision ASCII, `oid/…`, log/landmark/group IDs, canonical order | new |
 | `cosign` | `CosignedMessage` (with its rules: timestamp only on checkpoints), `Cosigner`, `CosignatureVerifier`, `SignedSubtree`; `mldsa::{MlDsaCosigner, MlDsaVerifier}` with salted signing by default, seed zeroization and the `tlog-cosignature` *key ID* | `firma_cabeza` |
 | `guard` | `SequenceGuard` over `hbs_state::IndexGuard`; `MemoryGuard` for tests only | `hbs-state` |
@@ -472,10 +476,13 @@ How it is tested, in three layers:
   and it opens a real `IndexGuard` on disk to check that the checkpoint number
   survives the process and reconciles (if the file system does not persist,
   the test says so and skips; any other error makes it fail).
-- **Against the reference implementation**: the `CosignedMessage`, `MTCProof`
-  and `TBSCertificateLogEntry` formats were checked by hand against `demo/` in
-  the draft's repository (Go); there is no automated interoperability test yet
-  (section 7).
+- **Against the reference implementation**: `tests/interop_corpus.rs` hands
+  this crate's verifier the corpus that `demo/` in the draft's repository
+  (Go) generated, 26 certificates with five deliberate negatives, and requires
+  the 26 verdicts the Go verifier gave; it also rebuilds the Go tool's log of
+  2122 entries from its tiles and reproduces its checkpoint. The other
+  direction (certificates from here through the Go verifier) needs Go and runs
+  from `interop/run.sh` (section 7 says what was measured and where).
 
 ---
 
@@ -505,16 +512,20 @@ C2SP's `mtc-tlog` profile (checkpoint signed by the CA as a note, `landmarks`
 in text, URL prefix per log), and request cosignatures from real witnesses with
 the tlog-witness protocol. The `CosignedMessage` here is byte for byte the
 `cosigned_message` of `tlog-cosignature` for ML-DSA-44, and `MlDsaCosigner`
-already computes the *key ID* and the `timestamped_signature` of the note line;
-what remains is the full note format (`signed-note`), the witness's HTTP
-client (`add-checkpoint`, `sign-subtree`) and the check of the consistency
-proofs the witness requires, which `subtree` already knows how to generate and
-verify.
+already computes the *key ID* and the `timestamped_signature` of the note line
+(`examples/interop.rs checkpoint` reads the reference tool's note and tiles,
+and finds that today the tool signs its checkpoint with timestamp zero and no
+timestamp bytes on the line, which is not the `tlog-cosignature` line format;
+a question for the working group, recorded in AUDIT.md §14); what remains is
+the full note format (`signed-note`), the witness's HTTP client
+(`add-checkpoint`, `sign-subtree`) and the check of the consistency proofs the
+witness requires, which `subtree` already knows how to generate and verify.
 
 **Phase 4 — the CA as trust anchor.** The CA's certificate with the
-`MTCCertificationAuthority { sigAlg, minSerial, maxSerial }` extension; an
-XMSS/LMS cosigner with `hbs-state` in front (the same `Cosigner`, `&mut self`
-already allows it); and the TLS side: `trust_anchors` with the landmark groups
+`MTCCertificationAuthority { sigAlg, minSerial, maxSerial }` extension is
+`cacert::CaCertificate` (written unsigned, read from the reference tool and
+by it); what remains is an XMSS/LMS cosigner with `hbs-state` in front (the
+same `Cosigner`, `&mut self` already allows it) and the TLS side: `trust_anchors` with the landmark groups
 (`caID.2.N.L`) in `rustls`, so that the server chooses between the *standalone*
 and the relative one.
 
@@ -534,13 +545,23 @@ per version, one ledger entry per change) and none of the STARK code.
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is
   corrected and covered by tests, and that is no substitute for an audit.
-- **There is no measured interoperability** with another implementation.
-  Cloudflare's Go implementation (`bwesterb/mtc`) still follows the earlier
-  batch design; the `demo/` directory of the draft's repository does implement
-  the current design (a generator and a verifier in Go), it is the natural
-  interoperability target, and the large vectors that `tests/large_vectors.rs`
-  passes come from it. The formats were checked by reading its code; a
-  certificate from here has not yet been run against its verifier.
+- **Interoperability is measured against one implementation, in one
+  setting.** The `demo/` directory of the draft's repository (a generator and
+  a verifier in Go, commit `99097c9e`, `-version plants-07`) is the only
+  other implementation of the current design; Cloudflare's `bwesterb/mtc`
+  still follows the earlier batch design. Against `demo/`, in both directions
+  and with negatives, everything measured agrees: its 26 verdicts are
+  reproduced here (`tests/interop_corpus.rs`, offline), its log of 2122
+  entries is rebuilt from its tiles to the same root, and the Go verifier
+  accepts the certificates from here, with this crate's CA certificate and
+  with its own (the two CAs share a test key, so the ML-DSA-44 key derivation
+  and signatures agree byte for byte). The run is recorded in AUDIT.md §14: it
+  was made by the assistant in a container with Go 1.27.1 built from source;
+  the author's own run, on his machine, is pending and will be its own entry.
+  Not measured: any other implementation, cosigners with ECDSA or Ed25519
+  keys (their cosignatures are ignored here), the Go tool's cosigner groups
+  (this crate's policy is "the CA and all of these"), and the witness
+  protocol.
 - **There is no request validation**: `CertificateRequest` arrives validated.
   Certifying what arrives is this crate's job; that it is true, the operator's.
 - **The log is not persisted**, only the guardian's counter. And `MemoryGuard`

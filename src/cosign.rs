@@ -242,6 +242,24 @@ pub mod mldsa {
     /// Bytes of an ML-DSA-44 public key (`pkEncode`).
     pub const MLDSA44_PUBLIC_KEY_LEN: usize = 1312;
 
+    /// The `tlog-cosignature` key ID of an ML-DSA-44 cosigner, from its
+    /// name and public key: **one definition** for whoever signs a
+    /// checkpoint and whoever checks a checkpoint line.
+    pub fn tlog_key_id_for(id: &TrustAnchorId, public_key: &[u8]) -> Result<[u8; 4], CosignError> {
+        if public_key.len() != MLDSA44_PUBLIC_KEY_LEN {
+            return Err(CosignError::Signing(format!(
+                "tlog-cosignature only defines the key ID for ML-DSA-44 ({MLDSA44_PUBLIC_KEY_LEN}-byte key, not {})",
+                public_key.len()
+            )));
+        }
+        let mut input = id.oid_name()?.into_bytes();
+        input.push(b'\n');
+        input.push(TLOG_KEY_TYPE_MLDSA44);
+        input.extend_from_slice(public_key);
+        let h = sha256(&input);
+        Ok([h[0], h[1], h[2], h[3]])
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum SigningMode {
         /// The variant recommended by FIPS 204: 32 bytes of salt per signature.
@@ -301,19 +319,7 @@ pub mod mldsa {
         /// It is what precedes the signature on a tlog checkpoint line.
         /// Only defined for ML-DSA-44.
         pub fn tlog_key_id(&self) -> Result<[u8; 4], CosignError> {
-            let pk = self.verifying_key_bytes();
-            if pk.len() != MLDSA44_PUBLIC_KEY_LEN {
-                return Err(CosignError::Signing(format!(
-                    "tlog-cosignature only defines the key ID for ML-DSA-44 ({MLDSA44_PUBLIC_KEY_LEN}-byte key, not {})",
-                    pk.len()
-                )));
-            }
-            let mut input = self.id.oid_name()?.into_bytes();
-            input.push(b'\n');
-            input.push(TLOG_KEY_TYPE_MLDSA44);
-            input.extend_from_slice(&pk);
-            let h = sha256(&input);
-            Ok([h[0], h[1], h[2], h[3]])
+            tlog_key_id_for(&self.id, &self.verifying_key_bytes())
         }
 
         /// The signature as it goes on a tlog note line (before base64):
@@ -376,6 +382,11 @@ pub mod mldsa {
             Some(MlDsaVerifier {
                 key: VerifyingKey::<P>::decode(&enc),
             })
+        }
+
+        /// The encoded public key (`pkEncode`), as it went in.
+        pub fn verifying_key_bytes(&self) -> Vec<u8> {
+            self.key.encode().to_vec()
         }
     }
 
