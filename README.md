@@ -81,6 +81,61 @@ predistribuido—. Medido con el ejemplo de este directorio (sección 4.4): 5.09
 bytes el certificado *standalone* con dos cofirmas ML-DSA-44, **271 bytes** el
 relativo a *landmark* de la misma entrada.
 
+### 1.1 Cronología verificada: de dónde viene la urgencia
+
+La nota de partida databa el problema con tres hitos (NIST, Chrome, prensa
+española). Se contrastaron contra fuentes primarias y se corrigieron donde
+hacía falta. Método: los servidores de NIST, Google, Cloudflare e IETF no son
+accesibles desde el entorno de trabajo, así que las fechas se apoyan en (a)
+las etiquetas git del repositorio del borrador, leídas directamente, y (b)
+fragmentos de búsqueda de las páginas primarias, contrastados por un segundo
+revisor independiente. La columna «estado» lo dice fila a fila.
+
+| fecha | hito | fuente primaria | estado |
+|---|---|---|---|
+| 2023-03-10 | Primer borrador individual `draft-davidben-tls-merkle-tree-certs-00` (Google y Cloudflare): el diseño de lotes | etiqueta git `-00` del repositorio del borrador | confirmado |
+| 2023-08-10 | Chromium Blog, «Protecting Chrome Traffic with Hybrid Kyber KEM»: X25519Kyber768 en Chrome 116 como experimento, no despliegue | blog.chromium.org/2023/08 | confirmado (día por fragmentos) |
+| 2024-04-16 | Chrome 124 estable: X25519Kyber768Draft00 (punto de código 0x6399) por defecto **solo en escritorio** | chromereleases.googleblog.com, `net/base/features.cc` en la etiqueta 124.0.6367.60 | confirmado |
+| 2024-05-23 | Chromium Blog, «Advancing Our Amazing Bet on Asymmetric Cryptography» | blog.chromium.org/2024/05 | día sin verificar |
+| 2024-08-13 | NIST publica FIPS 203 (ML-KEM), FIPS 204 (ML-DSA) y FIPS 205 (SLH-DSA); en vigor el 14 | nist.gov, Federal Register 2024-17956 | confirmado |
+| 2024-09-13 | Google Security Blog, «A new path for Kyber on the web»: Chrome 131 pasará a X25519MLKEM768 (0x11EC) | security.googleblog.com | confirmado |
+| 2024-11-12 | Chrome 131 estable: ML-KEM híbrido por defecto en escritorio; en móvil desde el commit del 2024-12-04 | chromereleases.googleblog.com, `kUseMLKEM` en las etiquetas 131.x | confirmado |
+| 2025-03-03 | `draft-davidben-…-04`, el último del diseño de lotes | etiqueta git `-04` | confirmado |
+| 2025-06-20 | `draft-davidben-…-05`: el rediseño (logs de emisión, subárboles, landmarks); entran Cloudflare y Geomys como autores | etiqueta git `-05` | confirmado |
+| 2025-10-28 | Cloudflare, «Keeping the Internet fast and secure: introducing Merkle Tree Certificates»: intención de experimentar con Chrome | blog.cloudflare.com | confirmado (día por fragmentos) |
+| 2025-11 | BoF PLANTS en IETF 124 (Montreal) | datatracker, `bofreq-westerbaan-…-plants` | día sin verificar |
+| 2026-01 | El IESG forma el grupo de trabajo PLANTS (PKI, Logs, And Tree Signatures) | ietf-announce | día sin verificar |
+| 2026-02-18 | Adopción: `draft-ietf-plants-merkle-tree-certs-00` | etiqueta git | confirmado |
+| 2026-02-27 | Google Security Blog, «Cultivating a robust and efficient quantum-safe HTTPS»: *bootstrapping* de MTC en el primer trimestre de 2027 y el *Chrome Quantum-resistant Root Store* en el tercero; sin X.509 poscuánticos en el almacén raíz de Chrome | security.googleblog.com | confirmado |
+| 2026-06-03 | Let's Encrypt, «A Post-Quantum Future for Let's Encrypt»: MTC en *staging* a finales de 2026, producción en 2027 | letsencrypt.org | confirmado |
+| 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`, la versión sobre la que está escrito este crate (más el repositorio de trabajo al 2026-09-29) | etiqueta git | confirmado |
+| 2026-09-29 | Cloudflare anuncia su CA pública y «Building a post-quantum certificate authority with Merkle Tree Certificates»: experimento con el 50 % de Chrome Beta 146, primeros MTC en el primer trimestre de 2027 | blog.cloudflare.com | confirmado (día por fragmentos) |
+| 2026-09-29 | Cobertura en prensa española del anuncio de Cloudflare; el titular de 20minutos coincide con ese gancho | infobae.com (mismo día) | sin verificar |
+
+**Correcciones a la nota de partida:**
+
+- El post de Chromium de 2023 se titula «Protecting Chrome Traffic with Hybrid
+  Kyber KEM», y Chrome 116 lo llevó como experimento al 1 % de Stable, no como
+  despliegue.
+- Chrome 124 salió el 16 de abril de 2024, no el 17, y activó
+  X25519Kyber768Draft00, un borrador pre-estándar: ML-KEM no existía como FIPS
+  hasta agosto. El paso a ML-KEM (X25519MLKEM768) fue Chrome 131, en noviembre.
+  Y solo en escritorio hasta diciembre de 2024.
+- La nota de prensa del NIST no nombra RSA ni ECC: «insta a empezar la
+  transición cuanto antes». La deprecación explícita de RSA/ECDSA/ECDH (2030 y
+  2035) está en el borrador de NIST IR 8547, de noviembre de 2024.
+- El experimento Chrome + Cloudflare lo anunció Cloudflare (octubre de 2025) y
+  se ejecutó en 2026 con Chrome Beta 146; no hay post de Chromium Blog sobre
+  MTC. El grupo PLANTS es de 2026, no de 2025.
+- La nota de 20minutos no parece adaptar comunicados del NIST ni de Chrome:
+  el gancho que coincide con su titular y su fecha es el anuncio de Cloudflare
+  del 29 de septiembre de 2026.
+
+**Sin verificar:** el titular, la fecha y la firma (Portaltic/Europa Press,
+EFE o redacción propia) del artículo de 20minutos; ninguna búsqueda devolvió su
+identificador y el dominio es inaccesible desde aquí. La atribución a una
+agencia es plausible y no está evidenciada.
+
 ---
 
 ## 2. Análisis de refactorización
