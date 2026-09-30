@@ -11,3 +11,19 @@ evaluarlas con enteros de 64 bits sin desbordar.
 
 Los lee `tests/large_vectors.rs` con un lector de JSON y base64 escrito a
 mano, para que `serde` no entre por la puerta de atras.
+
+## Licencia de estos dos ficheros
+
+El repositorio del que proceden declara que todo su material son
+contribuciones al proceso de estandarizacion del IETF (BCP 78, BCP 79 y las
+*IETF Trust Legal Provisions*), y que sus componentes de codigo, incluidos
+los vectores de prueba, quedan bajo la **Simplified BSD License** del IETF
+Trust. Se conservan aqui con esa licencia y esta atribucion, aparte de la
+licencia MIT OR Apache-2.0 del resto del crate:
+
+> Copyright (c) IETF Trust and the persons identified as authors of the
+> code. All rights reserved. Redistribution and use in source and binary
+> forms, with or without modification, is permitted pursuant to, and
+> subject to the license terms contained in, the Simplified BSD License
+> set forth in Section 4.c of the IETF Trust's Legal Provisions Relating
+> to IETF Documents (https://trustee.ietf.org/license-info).
