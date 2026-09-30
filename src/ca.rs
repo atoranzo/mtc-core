@@ -1,39 +1,39 @@
-//! # La CA: de la solicitud validada al certificado
+//! # The CA: from validated request to certificate
 //!
-//! Es el papel que en Arqueo hacia `zk-ssl-node`: el latido que cierra
-//! una epoca, compone la cabeza, la firma con el guardian delante y la
-//! publica. Aqui el «latido» es el **trabajo de checkpoint** de la
-//! seccion «Standalone Certificates», paso a paso:
+//! This is the role `zk-ssl-node` played in Arqueo: the `latido` (heartbeat)
+//! that closes an epoch, composes the head, signs it with the guard in front
+//! and publishes it. Here the "heartbeat" is the **checkpoint job** of the
+//! "Standalone Certificates" section, step by step:
 //!
-//! 1. la CA firma el checkpoint (`[0, tree_size)`, con sello de tiempo);
-//! 2. determina los **dos subarboles** que cubren las entradas nuevas
-//!    desde el checkpoint anterior;
-//! 3. firma cada subarbol;
-//! 4. pide cofirmas de cada subarbol a los cofirmantes externos (testigos,
-//!    espejos);
-//! 5. construye un certificado por entrada con el subarbol que la contiene
-//!    y las cofirmas recogidas.
+//! 1. the CA signs the checkpoint (`[0, tree_size)`, with a timestamp);
+//! 2. it determines the **two subtrees** that cover the entries added
+//!    since the previous checkpoint;
+//! 3. it signs each subtree;
+//! 4. it requests cosignatures of each subtree from the external cosigners
+//!    (witnesses, mirrors);
+//! 5. it builds one certificate per entry with the subtree that contains it
+//!    and the cosignatures collected.
 //!
-//! Antes del paso 1 hay un paso 0 que el borrador no escribe y Arqueo si:
-//! **reservar el numero de checkpoint en el guardian, con `fsync`**, y
-//! solo entonces firmar. Lo que ese numero protege y lo que no esta dicho
-//! con precision en [`crate::guard`]: es un registro duradero para
-//! reconciliar al arrancar, no una atadura criptografica de la vista
-//! firmada. Y el orden completo de una CA con disco es: persistir las
-//! entradas con `fsync`, reservar el numero, firmar. Este esqueleto no
-//! persiste las entradas: lo dice el plan, fase 1.
+//! Before step 1 there is a step 0 that the draft does not write down and
+//! Arqueo does: **reserve the checkpoint number in the guard, with `fsync`**,
+//! and only then sign. What that number protects and what it does not is
+//! stated precisely in [`crate::guard`]: it is a durable record for
+//! reconciling at startup, not a cryptographic binding of the signed view.
+//! And the full order for a CA with a disk is: persist the entries with
+//! `fsync`, reserve the number, sign. This skeleton does not persist the
+//! entries: the plan says so, phase 1.
 //!
-//! ## Lo que se comprueba al entrar, y lo que no
+//! ## What is checked on entry, and what is not
 //!
-//! [`CertificateRequest`] llega **ya validada** en lo que es politica de
-//! emision: el control del dominio (ACME), la prueba de posesion de la
-//! clave (la firma del CSR). Lo que si se comprueba aqui es lo que el
-//! borrador convierte en obligacion de la CA o lo que romperia el log:
-//! que la validez este ordenada y no supere la vida maxima (la caducidad
-//! de cada landmark tiene que cubrir el `notAfter` de todo lo que hay
-//! debajo), que los campos DER tengan la forma que dicen tener, y que la
-//! entrada no lleve extensiones que la CA no reconoce (**una CA no firma
-//! lo que no entiende**).
+//! [`CertificateRequest`] arrives **already validated** as far as issuance
+//! policy goes: domain control (ACME), proof of possession of the key (the
+//! CSR signature). What is checked here is what the draft turns into an
+//! obligation of the CA, or what would break the log: that the validity is
+//! ordered and does not exceed the maximum lifetime (the expiry of each
+//! landmark has to cover the `notAfter` of everything beneath it), that the
+//! DER fields have the shape they claim to have, and that the entry carries
+//! no extensions the CA does not recognize (**a CA does not sign what it
+//! does not understand**).
 
 use crate::cosign::{CosignError, Cosigner, SignedSubtree, SubtreeSignature};
 use crate::der;
@@ -49,38 +49,38 @@ use crate::tai::{TaiError, TrustAnchorId};
 #[derive(Debug, Clone)]
 pub struct CaConfig {
     pub ca_id: TrustAnchorId,
-    /// El log actual. Una CA real lleva una serie; aqui, uno.
+    /// The current log. A real CA runs a series; here, one.
     pub log_number: u16,
-    /// Vida maxima de un certificado, en segundos: acota la validez que se
-    /// admite y fija la caducidad de cada landmark.
+    /// Maximum lifetime of a certificate, in seconds: it bounds the validity
+    /// that is accepted and fixes the expiry of each landmark.
     pub max_cert_lifetime: u64,
 }
 
-/// Una solicitud **ya validada** por la capa de arriba.
+/// A request **already validated** by the layer above.
 #[derive(Debug, Clone)]
 pub struct CertificateRequest {
-    /// `Name` DER del sujeto.
+    /// DER `Name` of the subject.
     pub subject: Vec<u8>,
-    /// `SubjectPublicKeyInfo` DER, entero.
+    /// DER `SubjectPublicKeyInfo`, whole.
     pub spki: Vec<u8>,
     pub validity: Validity,
-    /// `Extensions` DER (SAN, key usage…), o nada.
+    /// DER `Extensions` (SAN, key usage…), or nothing.
     pub extensions: Option<Vec<u8>>,
-    /// Extensiones **de la entrada del log**. Hoy no hay ninguna definida,
-    /// asi que cualquiera se rechaza: ver [`crate::entry::RECOGNIZED_EXTENSION_TYPES`].
+    /// Extensions **of the log entry**. None is defined today, so any of
+    /// them is rejected: see [`crate::entry::RECOGNIZED_EXTENSION_TYPES`].
     pub log_entry_extensions: Vec<LogEntryExtension>,
 }
 
-/// Lo que produce un trabajo de checkpoint.
+/// What a checkpoint job produces.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
-    /// El numero reservado en el guardian antes de firmar.
+    /// The number reserved in the guard before signing.
     pub number: u64,
     pub tree_size: u64,
     pub root: HashValue,
-    /// La firma de la CA sobre `[0, tree_size)` con sello de tiempo.
+    /// The CA's signature over `[0, tree_size)` with a timestamp.
     pub ca_signature: SubtreeSignature,
-    /// Los dos subarboles que cubren lo nuevo, con sus cofirmas.
+    /// The two subtrees covering what is new, with their cosignatures.
     pub subtrees: Vec<SignedSubtree>,
 }
 
@@ -94,27 +94,27 @@ pub enum CaError {
     Proof(ProofError),
     Landmark(LandmarkError),
     Tai(TaiError),
-    /// El cofirmante de la CA no lleva el CA ID.
+    /// The CA's cosigner does not carry the CA ID.
     CosignerIdMismatch {
         expected: TrustAnchorId,
         got: TrustAnchorId,
     },
-    /// Un cofirmante externo con el ID de la CA o con un ID ya registrado.
+    /// An external cosigner with the CA's ID or with an already registered ID.
     DuplicateCosigner(TrustAnchorId),
-    /// `notBefore > notAfter`, o la vida supera `max_cert_lifetime`.
+    /// `notBefore > notAfter`, or the lifetime exceeds `max_cert_lifetime`.
     InvalidValidity {
         not_before: u64,
         not_after: u64,
         max_cert_lifetime: u64,
     },
-    /// Un campo DER de la solicitud no tiene la forma que dice tener.
+    /// A DER field of the request does not have the shape it claims to have.
     InvalidDer {
         field: &'static str,
         error: der::DerError,
     },
-    /// No hay entrada con ese indice.
+    /// There is no entry with that index.
     NoSuchEntry(u64),
-    /// La entrada existe pero ningun checkpoint la ha cubierto todavia.
+    /// The entry exists but no checkpoint has covered it yet.
     NotYetCheckpointed(u64),
 }
 
@@ -122,32 +122,32 @@ impl core::fmt::Display for CaError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CaError::Log(e) => write!(f, "log: {e}"),
-            CaError::Entry(e) => write!(f, "entrada: {e}"),
-            CaError::Guard(e) => write!(f, "guardian: {e}"),
-            CaError::Cosign(e) => write!(f, "cofirma: {e}"),
-            CaError::Subtree(e) => write!(f, "subarbol: {e}"),
-            CaError::Proof(e) => write!(f, "prueba: {e}"),
+            CaError::Entry(e) => write!(f, "entry: {e}"),
+            CaError::Guard(e) => write!(f, "guard: {e}"),
+            CaError::Cosign(e) => write!(f, "cosignature: {e}"),
+            CaError::Subtree(e) => write!(f, "subtree: {e}"),
+            CaError::Proof(e) => write!(f, "proof: {e}"),
             CaError::Landmark(e) => write!(f, "landmark: {e}"),
-            CaError::Tai(e) => write!(f, "identificador: {e}"),
+            CaError::Tai(e) => write!(f, "identifier: {e}"),
             CaError::CosignerIdMismatch { expected, got } => {
                 write!(
                     f,
-                    "el cofirmante de la CA lleva el ID {got} y la CA es {expected}"
+                    "the CA's cosigner carries ID {got} and the CA is {expected}"
                 )
             }
-            CaError::DuplicateCosigner(id) => write!(f, "cofirmante repetido: {id}"),
+            CaError::DuplicateCosigner(id) => write!(f, "duplicate cosigner: {id}"),
             CaError::InvalidValidity {
                 not_before,
                 not_after,
                 max_cert_lifetime,
             } => write!(
                 f,
-                "validez invalida: [{not_before}, {not_after}] con vida maxima {max_cert_lifetime}"
+                "invalid validity: [{not_before}, {not_after}] with maximum lifetime {max_cert_lifetime}"
             ),
-            CaError::InvalidDer { field, error } => write!(f, "DER invalido en {field}: {error}"),
-            CaError::NoSuchEntry(i) => write!(f, "no hay entrada {i}"),
+            CaError::InvalidDer { field, error } => write!(f, "invalid DER in {field}: {error}"),
+            CaError::NoSuchEntry(i) => write!(f, "no entry {i}"),
             CaError::NotYetCheckpointed(i) => {
-                write!(f, "la entrada {i} aun no esta bajo un checkpoint")
+                write!(f, "entry {i} is not yet under a checkpoint")
             }
         }
     }
@@ -161,31 +161,31 @@ macro_rules! from_error {
 from_error!(LogError => Log, EntryError => Entry, GuardError => Guard, CosignError => Cosign,
             SubtreeError => Subtree, ProofError => Proof, LandmarkError => Landmark, TaiError => Tai);
 
-/// La CA de MTC.
+/// The MTC CA.
 pub struct CertificationAuthority<G: SequenceGuard> {
     cfg: CaConfig,
     log_id: TrustAnchorId,
     log: IssuanceLog,
-    /// Las hojas, por indice: la CA las necesita enteras (con el SPKI)
-    /// para componer el `TBSCertificate`; el log solo lleva el hash.
+    /// The leaves, by index: the CA needs them whole (with the SPKI) to
+    /// compose the `TBSCertificate`; the log only carries the hash.
     leaves: Vec<MtcLeaf>,
-    /// El mayor `notAfter` anotado: la cota inferior de la caducidad de
-    /// cualquier landmark que cubra el log entero.
+    /// The largest `notAfter` recorded: the lower bound on the expiry of
+    /// any landmark that covers the whole log.
     max_not_after: u64,
     ca_cosigner: Box<dyn Cosigner>,
     external_cosigners: Vec<Box<dyn Cosigner>>,
     guard: G,
     last_checkpoint_size: u64,
-    /// Los subarboles firmados, en orden de emision. Crecen con cada
-    /// checkpoint; [`Self::prune_signed_subtrees_below`] los recorta.
+    /// The signed subtrees, in issuance order. They grow with each
+    /// checkpoint; [`Self::prune_signed_subtrees_below`] trims them.
     signed_subtrees: Vec<SignedSubtree>,
     landmarks: LandmarkSequence,
 }
 
 impl<G: SequenceGuard> CertificationAuthority<G> {
-    /// Una CA con su cofirmante (el que tiene el ID de la CA) y su guardian.
-    /// Falla al arrancar, no al emitir, si el CA ID no deja sitio a sus
-    /// derivados o el cofirmante no lleva ese ID.
+    /// A CA with its cosigner (the one holding the CA's ID) and its guard.
+    /// Fails at startup, not at issuance, if the CA ID leaves no room for
+    /// its derived IDs or the cosigner does not carry that ID.
     pub fn new(cfg: CaConfig, ca_cosigner: Box<dyn Cosigner>, guard: G) -> Result<Self, CaError> {
         cfg.ca_id.check_as_ca_id()?;
         if ca_cosigner.cosigner_id() != &cfg.ca_id {
@@ -211,9 +211,10 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         })
     }
 
-    /// Un cofirmante externo (testigo, espejo) al que pedir cofirmas. Ni el
-    /// ID de la CA ni uno ya registrado: el `MTCProof` exige IDs unicos y
-    /// una repeticion sustituiria en silencio la firma anterior.
+    /// An external cosigner (witness, mirror) to request cosignatures from.
+    /// Neither the CA's ID nor one already registered: the `MTCProof`
+    /// requires unique IDs, and a repeat would silently replace the previous
+    /// signature.
     pub fn add_cosigner(&mut self, cosigner: Box<dyn Cosigner>) -> Result<(), CaError> {
         let id = cosigner.cosigner_id();
         if id == &self.cfg.ca_id
@@ -261,8 +262,8 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         Ok(())
     }
 
-    /// **Paso 3a**: comprueba la solicitud, la anota en el log y devuelve
-    /// su indice.
+    /// **Step 3a**: checks the request, records it in the log and returns
+    /// its index.
     pub fn submit(&mut self, req: CertificateRequest) -> Result<u64, CaError> {
         let v = req.validity;
         if v.not_before > v.not_after || v.not_after - v.not_before > self.cfg.max_cert_lifetime {
@@ -290,7 +291,7 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
             subject_unique_id: None,
             extensions: req.extensions,
         };
-        // `log_entry` rechaza las extensiones de entrada no reconocidas.
+        // `log_entry` rejects unrecognized log entry extensions.
         let entry = leaf.log_entry(req.log_entry_extensions)?;
         let index = self.log.append(&entry)?;
         debug_assert_eq!(index as usize, self.leaves.len());
@@ -299,10 +300,10 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         Ok(index)
     }
 
-    /// **El trabajo de checkpoint** (pasos 0 a 4). `None` si no hay nada
-    /// nuevo desde el anterior. Si algo falla a medias, el estado de la CA
-    /// no cambia: el numero reservado queda huerfano, que es el caso que
-    /// el guardian sabe reconciliar.
+    /// **The checkpoint job** (steps 0 to 4). `None` if nothing is new
+    /// since the previous one. If something fails midway, the CA's state
+    /// does not change: the reserved number is left orphaned, which is the
+    /// case the guard knows how to reconcile.
     pub fn run_checkpoint_job(&mut self, now: u64) -> Result<Option<Checkpoint>, CaError> {
         let tree_size = self.log.size();
         if tree_size == self.last_checkpoint_size {
@@ -310,10 +311,10 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         }
         let root = self.log.root();
 
-        // ── 0 · reservar y persistir ANTES de firmar ──
+        // ── 0 · reserve and persist BEFORE signing ──
         let number = self.guard.reserve()?;
 
-        // ── 1 · la CA firma el checkpoint ──
+        // ── 1 · the CA signs the checkpoint ──
         let checkpoint = Subtree {
             start: 0,
             end: tree_size,
@@ -322,7 +323,7 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
             .ca_cosigner
             .sign_subtree(&self.log_id, checkpoint, root, now)?;
 
-        // ── 2 · los dos subarboles que cubren lo nuevo ──
+        // ── 2 · the two subtrees covering what is new ──
         let (left, right) = covering_subtrees(self.last_checkpoint_size, tree_size);
         let mut subtrees = Vec::new();
         for st in [left, right] {
@@ -331,9 +332,9 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
             }
             let hash = self.log.subtree_hash(st)?;
             let mut signed = SignedSubtree::new(st, hash);
-            // ── 3 · la CA firma cada subarbol (timestamp 0) ──
+            // ── 3 · the CA signs each subtree (timestamp 0) ──
             signed.push(self.ca_cosigner.sign_subtree(&self.log_id, st, hash, 0)?);
-            // ── 4 · cofirmas externas ──
+            // ── 4 · external cosignatures ──
             for c in self.external_cosigners.iter_mut() {
                 signed.push(c.sign_subtree(&self.log_id, st, hash, 0)?);
             }
@@ -375,8 +376,8 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         })
     }
 
-    /// **Paso 5**: el certificado *standalone* de una entrada, con el
-    /// subarbol firmado mas reciente que la contiene.
+    /// **Step 5**: the *standalone* certificate of an entry, with the most
+    /// recent signed subtree that contains it.
     pub fn standalone_certificate(&self, index: u64) -> Result<MtcCertificate, CaError> {
         if index >= self.log.size() {
             return Err(CaError::NoSuchEntry(index));
@@ -390,20 +391,20 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         self.certificate_with(index, signed.subtree, signed.signatures.clone())
     }
 
-    /// Olvida los subarboles firmados que terminan antes de `index`: los de
-    /// entradas ya caducadas o ya cubiertas por un landmark. Es lo unico
-    /// que crece con cada checkpoint.
+    /// Forgets the signed subtrees that end before `index`: those of entries
+    /// already expired or already covered by a landmark. It is the only
+    /// thing that grows with each checkpoint.
     pub fn prune_signed_subtrees_below(&mut self, index: u64) -> usize {
         let before = self.signed_subtrees.len();
         self.signed_subtrees.retain(|s| s.subtree.end > index);
         before - self.signed_subtrees.len()
     }
 
-    /// Asigna un landmark si el arbol crecio desde el ultimo (procedimiento
-    /// RECOMENDADO). La caducidad es `now + max_cert_lifetime` **o el mayor
-    /// `notAfter` de las entradas que cubre, si es posterior**: el borrador
-    /// exige que un landmark no caduque antes que nada de lo que hay
-    /// debajo.
+    /// Allocates a landmark if the tree has grown since the last one
+    /// (RECOMMENDED procedure). The expiry is `now + max_cert_lifetime`
+    /// **or the largest `notAfter` of the entries it covers, if later**: the
+    /// draft requires that a landmark not expire before anything beneath
+    /// it.
     pub fn allocate_landmark(&mut self, now: u64) -> Result<Option<Landmark>, CaError> {
         let size = self.last_checkpoint_size;
         if size == self.landmarks.latest().tree_size {
@@ -415,8 +416,8 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         Ok(Some(*self.landmarks.allocate(size, expiry)?))
     }
 
-    /// El certificado **relativo a landmark** de una entrada: solo la
-    /// prueba de inclusion al subarbol del landmark, sin firmas.
+    /// The **landmark-relative** certificate of an entry: only the inclusion
+    /// proof to the landmark's subtree, with no signatures.
     pub fn landmark_relative_certificate(&self, index: u64) -> Result<MtcCertificate, CaError> {
         if index >= self.log.size() {
             return Err(CaError::NoSuchEntry(index));
@@ -425,8 +426,8 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         self.certificate_with(index, subtree, Vec::new())
     }
 
-    /// Los subarboles de los landmarks activos con su hash: lo que se
-    /// predistribuye a las partes que confian como subarboles de confianza.
+    /// The subtrees of the active landmarks with their hash: what is
+    /// predistributed to relying parties as trusted subtrees.
     pub fn active_landmark_subtrees(
         &self,
         now: u64,
@@ -436,7 +437,7 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
             let (a, b) = self
                 .landmarks
                 .subtrees(l.number)
-                .expect("landmark existente");
+                .expect("existing landmark");
             for st in [a, b] {
                 if !st.is_empty() {
                     out.push((*l, st, self.log.subtree_hash(st)?));

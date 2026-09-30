@@ -1,26 +1,26 @@
-//! # La hoja: `MTCLogEntry` y `TBSCertificateLogEntry`
+//! # The leaf: `MTCLogEntry` and `TBSCertificateLogEntry`
 //!
-//! En Arqueo la hoja era `native_leaf(public_id, saldo, nonce)`, un
-//! compromiso de tres elementos de campo. En MTC la hoja es lo que la CA
-//! **certifica**: los campos del certificado que no dependen del tamano
-//! de la clave. La clave publica entra **por su hash** (`subjectPublicKey-
-//! InfoHash`) y no hay firma dentro de la entrada: por eso el log no
-//! crece con ML-DSA, que es toda la razon de ser de MTC.
+//! In Arqueo the leaf was `native_leaf(public_id, saldo, nonce)`, a
+//! commitment to three field elements. In MTC the leaf is what the CA
+//! **certifies**: the certificate fields that do not depend on the size
+//! of the key. The public key enters **through its hash** (`subjectPublicKey-
+//! InfoHash`) and there is no signature inside the entry: that is why the log
+//! does not grow with ML-DSA, which is the whole reason MTC exists.
 //!
-//! [`MtcLeaf`] es la estructura de trabajo de la CA (lo que el usuario
-//! pidio como `MTCLeaf`: clave, sujeto, validez, extensiones); de ella
-//! salen **dos** codificaciones que tienen que cuadrar byte a byte:
+//! [`MtcLeaf`] is the CA's working structure (what the user asked for as
+//! `MTCLeaf`: key, subject, validity, extensions); from it come **two**
+//! encodings that have to match byte for byte:
 //!
-//! - [`MtcLeaf::tbs_cert_entry_data`], los campos de un
-//!   `TBSCertificateLogEntry` concatenados (sin la cabecera del SEQUENCE,
-//!   para que el verificador hashee en un solo paso), que va dentro del
-//!   [`MtcLogEntry`] que se anota en el log;
-//! - [`MtcLeaf::tbs_certificate`], el `TBSCertificate` X.509 que viaja en
-//!   el certificado, con el numero de serie `(log << 48) | index` y la
-//!   clave entera.
+//! - [`MtcLeaf::tbs_cert_entry_data`], the fields of a
+//!   `TBSCertificateLogEntry` concatenated (without the SEQUENCE header,
+//!   so that the verifier hashes in a single pass), which goes inside the
+//!   [`MtcLogEntry`] that is recorded in the log;
+//! - [`MtcLeaf::tbs_certificate`], the X.509 `TBSCertificate` that travels in
+//!   the certificate, with the serial number `(log << 48) | index` and the
+//!   whole key.
 //!
-//! ⚠️ El verificador reconstruye la primera a partir de la segunda. Si las
-//! dos divergen, ningun certificado verifica: hay un test que las cruza.
+//! ⚠️ The verifier reconstructs the first from the second. If the two
+//! diverge, no certificate verifies: there is a test that cross-checks them.
 
 use crate::der::{self, DerError, Tlv};
 use crate::hash::{hash_leaf, sha256, HashValue, HASH_SIZE};
@@ -29,24 +29,24 @@ use crate::hash::{hash_leaf, sha256, HashValue, HASH_SIZE};
 pub const NULL_ENTRY: u16 = 0;
 /// `tbs_cert_entry(1)`.
 pub const TBS_CERT_ENTRY: u16 = 1;
-/// Un `MTCLogEntry` no supera los 65535 bytes (compatibilidad tlog).
+/// An `MTCLogEntry` does not exceed 65535 bytes (tlog compatibility).
 pub const MAX_ENTRY_SIZE: usize = 65_535;
 
-/// Los tipos de extension de entrada que esta CA reconoce. **Hoy, ninguno**:
-/// el registro del borrador esta vacio, y «una CA MUST NOT firmar un
-/// subarbol que contenga una entrada con un `extension_type` que no
-/// reconoce». Cuando se defina uno, entra aqui con su semantica.
+/// The entry extension types this CA recognizes. **Today, none**:
+/// the draft's registry is empty, and "a CA MUST NOT sign a
+/// subtree containing an entry with an `extension_type` it does not
+/// recognize". When one is defined, it goes here with its semantics.
 pub const RECOGNIZED_EXTENSION_TYPES: &[u16] = &[];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryError {
-    /// Las extensiones no van en orden estrictamente creciente de tipo.
+    /// The extensions are not in strictly increasing order of type.
     ExtensionsNotSorted,
-    /// Un campo supera el maximo de su prefijo de longitud.
+    /// A field exceeds the maximum of its length prefix.
     TooLong(&'static str, usize),
-    /// Tipo de entrada no reconocido: una CA NO debe firmar lo que no entiende.
+    /// Unrecognized entry type: a CA must NOT sign what it does not understand.
     UnknownType(u16),
-    /// Tipo de extension de entrada no reconocido: idem.
+    /// Unrecognized entry extension type: likewise.
     UnknownExtension(u16),
     Truncated,
     Der(DerError),
@@ -73,8 +73,8 @@ pub struct LogEntryExtension {
     pub extension_data: Vec<u8>,
 }
 
-/// `MTCLogEntryExtension extensions<0..2^16-1>`, con su prefijo de dos
-/// bytes; exige orden estrictamente creciente por tipo.
+/// `MTCLogEntryExtension extensions<0..2^16-1>`, with its two-byte
+/// prefix; requires strictly increasing order by type.
 pub fn encode_extensions(exts: &[LogEntryExtension]) -> Result<Vec<u8>, EntryError> {
     let mut body = Vec::new();
     let mut last: Option<u16> = None;
@@ -102,7 +102,7 @@ pub fn encode_extensions(exts: &[LogEntryExtension]) -> Result<Vec<u8>, EntryErr
     Ok(out)
 }
 
-/// Lee `extensions<0..2^16-1>` y devuelve el resto.
+/// Reads `extensions<0..2^16-1>` and returns the remainder.
 pub fn decode_extensions(input: &[u8]) -> Result<(Vec<LogEntryExtension>, &[u8]), EntryError> {
     if input.len() < 2 {
         return Err(EntryError::Truncated);
@@ -135,12 +135,12 @@ pub fn decode_extensions(input: &[u8]) -> Result<(Vec<LogEntryExtension>, &[u8])
     Ok((out, rest))
 }
 
-/// `MTCLogEntry`: lo que se anota en el log.
+/// `MTCLogEntry`: what is recorded in the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MtcLogEntry {
-    /// `null_entry`: no afirma nada; una CA lo certifica sin responsabilidad.
+    /// `null_entry`: asserts nothing; a CA certifies it without liability.
     Null { extensions: Vec<LogEntryExtension> },
-    /// `tbs_cert_entry`: los campos del `TBSCertificateLogEntry` concatenados.
+    /// `tbs_cert_entry`: the fields of the `TBSCertificateLogEntry` concatenated.
     TbsCert {
         extensions: Vec<LogEntryExtension>,
         tbs_cert_entry_data: Vec<u8>,
@@ -156,7 +156,7 @@ impl MtcLogEntry {
         }
     }
 
-    /// La serializacion TLS de la entrada.
+    /// The TLS serialization of the entry.
     pub fn encode(&self) -> Result<Vec<u8>, EntryError> {
         let mut out = encode_extensions(self.extensions())?;
         match self {
@@ -175,7 +175,7 @@ impl MtcLogEntry {
         Ok(out)
     }
 
-    /// Lee una entrada cuya longitud total se conoce.
+    /// Reads an entry whose total length is known.
     pub fn decode(input: &[u8]) -> Result<Self, EntryError> {
         if input.len() > MAX_ENTRY_SIZE {
             return Err(EntryError::TooLong("MTCLogEntry", input.len()));
@@ -203,7 +203,7 @@ impl MtcLogEntry {
     }
 }
 
-/// `Validity { notBefore, notAfter }` en segundos POSIX.
+/// `Validity { notBefore, notAfter }` in POSIX seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Validity {
     pub not_before: u64,
@@ -217,7 +217,7 @@ impl Validity {
         der::sequence(&c)
     }
 
-    /// Lee un `Validity` (el TLV entero).
+    /// Reads a `Validity` (the whole TLV).
     pub fn from_der(validity: &Tlv<'_>) -> Result<Self, DerError> {
         if validity.tag != der::TAG_SEQUENCE {
             return Err(DerError::UnexpectedTag {
@@ -241,38 +241,38 @@ impl Validity {
     }
 }
 
-/// **La hoja de trabajo de la CA**: lo que certifica de un solicitante.
+/// **The CA's working leaf**: what it certifies about an applicant.
 ///
-/// Los campos DER (`issuer`, `subject`, `spki`, `extensions`) se aceptan
-/// ya codificados: los produce la capa de validacion (ACME + `x509-cert`),
-/// no este crate. `issuer` lo pone la CA con [`der::name_from_ca_id`].
+/// The DER fields (`issuer`, `subject`, `spki`, `extensions`) are accepted
+/// already encoded: they are produced by the validation layer (ACME + `x509-cert`),
+/// not by this crate. `issuer` is set by the CA with [`der::name_from_ca_id`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtcLeaf {
-    /// `Version`: 2 = v3 (obligatorio con extensiones). 0 (v1) se omite.
+    /// `Version`: 2 = v3 (mandatory with extensions). 0 (v1) is omitted.
     pub version: u8,
-    /// `Name` DER del emisor: **el CA ID**, siempre.
+    /// DER `Name` of the issuer: **the CA ID**, always.
     pub issuer: Vec<u8>,
     pub validity: Validity,
-    /// `Name` DER del sujeto (puede ser vacio, `30 00`, si todo va en el SAN).
+    /// DER `Name` of the subject (may be empty, `30 00`, if everything goes in the SAN).
     pub subject: Vec<u8>,
-    /// `SubjectPublicKeyInfo` DER **entero**: en la entrada va su hash, en
-    /// el certificado va completo.
+    /// The **whole** DER `SubjectPublicKeyInfo`: the entry carries its hash, the
+    /// certificate carries it in full.
     pub spki: Vec<u8>,
-    /// `issuerUniqueID [1] IMPLICIT` (contenido del BIT STRING), rara vez.
+    /// `issuerUniqueID [1] IMPLICIT` (BIT STRING content), rarely used.
     pub issuer_unique_id: Option<Vec<u8>>,
-    /// `subjectUniqueID [2] IMPLICIT`, rara vez.
+    /// `subjectUniqueID [2] IMPLICIT`, rarely used.
     pub subject_unique_id: Option<Vec<u8>>,
-    /// `Extensions` DER (el SEQUENCE OF Extension, sin el `[3]`).
+    /// DER `Extensions` (the SEQUENCE OF Extension, without the `[3]`).
     pub extensions: Option<Vec<u8>>,
 }
 
 impl MtcLeaf {
-    /// El `algorithm` del `SubjectPublicKeyInfo`, como TLV entero.
+    /// The `algorithm` of the `SubjectPublicKeyInfo`, as a whole TLV.
     pub fn spki_algorithm(&self) -> Result<&[u8], EntryError> {
         Ok(der::spki_algorithm(&self.spki)?)
     }
 
-    /// `subjectPublicKeyInfoHash`: el hash del log sobre el SPKI en DER.
+    /// `subjectPublicKeyInfoHash`: the log's hash over the DER SPKI.
     pub fn spki_hash(&self) -> HashValue {
         sha256(&self.spki)
     }
@@ -299,7 +299,7 @@ impl MtcLeaf {
         out
     }
 
-    /// Los campos del `TBSCertificateLogEntry`, concatenados.
+    /// The fields of the `TBSCertificateLogEntry`, concatenated.
     pub fn tbs_cert_entry_data(&self) -> Result<Vec<u8>, EntryError> {
         let mut out = self.version_der();
         out.extend_from_slice(&self.issuer);
@@ -311,8 +311,8 @@ impl MtcLeaf {
         Ok(out)
     }
 
-    /// La entrada del log para esta hoja. Rechaza extensiones que no esten
-    /// en [`RECOGNIZED_EXTENSION_TYPES`]: la CA no las firmaria.
+    /// The log entry for this leaf. Rejects extensions that are not in
+    /// [`RECOGNIZED_EXTENSION_TYPES`]: the CA would not sign them.
     pub fn log_entry(&self, extensions: Vec<LogEntryExtension>) -> Result<MtcLogEntry, EntryError> {
         if let Some(e) = extensions
             .iter()
@@ -326,7 +326,7 @@ impl MtcLeaf {
         })
     }
 
-    /// El `TBSCertificate` X.509 con `serialNumber = (log << 48) | index` y
+    /// The X.509 `TBSCertificate` with `serialNumber = (log << 48) | index` and
     /// `signature = id-alg-mtcProof`.
     pub fn tbs_certificate(&self, serial: u64) -> Result<Vec<u8>, EntryError> {
         let mut c = self.version_der();
@@ -341,9 +341,9 @@ impl MtcLeaf {
     }
 }
 
-/// **La entrada reconstruida desde un `TBSCertificate`** (seccion
-/// «Verifying Certificate Signatures», el hash en un solo paso): lo que
-/// el verificador hashea sin haber visto nunca la hoja de la CA.
+/// **The entry reconstructed from a `TBSCertificate`** (section
+/// "Verifying Certificate Signatures", the single-pass hash): what the
+/// verifier hashes without ever having seen the CA's leaf.
 pub fn entry_bytes_from_tbs(
     tbs: &der::TbsFields<'_>,
     extensions: &[LogEntryExtension],
@@ -369,9 +369,9 @@ pub(crate) mod fixtures {
     use super::*;
     use crate::tai::TrustAnchorId;
 
-    /// Un SPKI de juguete: `SEQUENCE { AlgorithmIdentifier { OID }, BIT STRING key }`.
+    /// A toy SPKI: `SEQUENCE { AlgorithmIdentifier { OID }, BIT STRING key }`.
     pub fn toy_spki(key: &[u8]) -> Vec<u8> {
-        let mut c = der::algorithm_identifier(&[1, 3, 101, 112]); // id-Ed25519, por nombrar uno
+        let mut c = der::algorithm_identifier(&[1, 3, 101, 112]); // id-Ed25519, to name one
         c.extend(der::bit_string(key));
         der::sequence(&c)
     }

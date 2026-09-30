@@ -1,25 +1,25 @@
-//! # Lo minimo de DER y X.509 que una CA de MTC necesita componer y leer
+//! # The bare minimum of DER and X.509 that an MTC CA needs to compose and read
 //!
-//! ⚠️ **No es un parser X.509.** Es lo justo para (a) componer un
-//! `TBSCertificateLogEntry` y un `TBSCertificate` a partir de campos que
-//! YA vienen en DER (el `Name` del sujeto, las `Extensions`, el
-//! `SubjectPublicKeyInfo`) y (b) trocear un certificado en sus campos
-//! para hashear la entrada en un solo paso, como describe la seccion
-//! «Verifying Certificate Signatures». Quien necesite construir un `Name`
-//! con CN y O, o parsear un CSR PKCS#10, lo hace con `x509-cert`/`der` de
-//! RustCrypto y le pasa a este crate los bytes.
+//! ⚠️ **This is not an X.509 parser.** It is just enough to (a) compose a
+//! `TBSCertificateLogEntry` and a `TBSCertificate` from fields that
+//! ALREADY arrive in DER (the subject `Name`, the `Extensions`, the
+//! `SubjectPublicKeyInfo`) and (b) split a certificate into its fields
+//! in order to hash the entry in a single pass, as the section
+//! "Verifying Certificate Signatures" describes. Whoever needs to build a
+//! `Name` with CN and O, or to parse a PKCS#10 CSR, does so with
+//! RustCrypto's `x509-cert`/`der` and hands this crate the bytes.
 //!
-//! Lo que si vive aqui, porque es **decision de formato del borrador** y
-//! tiene que tener una sola definicion: el nombre distinguido de un CA ID
-//! (`RELATIVE-OID` bajo el atributo experimental), los OID del arco
-//! `1.3.6.1.4.1.44363.47` y el `AlgorithmIdentifier` de `id-alg-mtcProof`.
+//! What does live here, because it is a **format decision of the draft**
+//! and must have a single definition: the distinguished name of a CA ID
+//! (`RELATIVE-OID` under the experimental attribute), the OIDs of the
+//! `1.3.6.1.4.1.44363.47` arc and the `AlgorithmIdentifier` of `id-alg-mtcProof`.
 
 use crate::tai::TrustAnchorId;
 
-/// El arco experimental que el borrador reserva (donado por Cloudflare).
+/// The experimental arc the draft reserves (donated by Cloudflare).
 pub const ARC_MTC_EXPERIMENTAL: [u64; 8] = [1, 3, 6, 1, 4, 1, 44363, 47];
 
-/// `id-rdna-trustAnchorID`, en su OID experimental `…47.3`.
+/// `id-rdna-trustAnchorID`, in its experimental OID `…47.3`.
 pub fn oid_rdna_trust_anchor_id() -> Vec<u64> {
     let mut v = ARC_MTC_EXPERIMENTAL.to_vec();
     v.push(3);
@@ -57,19 +57,19 @@ pub const TAG_SET: u8 = 0x31;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DerError {
     Truncated,
-    /// Longitud en forma no minima, indefinida o mayor que `usize`.
+    /// Length in non-minimal form, indefinite, or larger than `usize`.
     BadLength,
     UnexpectedTag {
         expected: u8,
         found: u8,
     },
-    /// Quedaron bytes sin consumir donde no debia haberlos.
+    /// Bytes were left unconsumed where there should have been none.
     TrailingData,
     BadInteger,
     BadTime,
     BadOid,
-    /// El `Name` no es el de un CA ID (un solo RDN con un solo atributo
-    /// `id-rdna-trustAnchorID`).
+    /// The `Name` is not that of a CA ID (a single RDN with a single
+    /// `id-rdna-trustAnchorID` attribute).
     NotACaIdName,
 }
 
@@ -81,13 +81,13 @@ impl core::fmt::Display for DerError {
 
 impl std::error::Error for DerError {}
 
-// ───────────────────────── codificacion ─────────────────────────
+// ───────────────────────── encoding ─────────────────────────
 
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Longitud DER (forma definida, minima).
+/// DER length (definite, minimal form).
 pub fn encode_len(n: usize) -> Vec<u8> {
     if n < 0x80 {
         vec![n as u8]
@@ -129,12 +129,12 @@ pub fn explicit(n: u8, content: &[u8]) -> Vec<u8> {
     tlv(0xa0 | n, content)
 }
 
-/// `[n] IMPLICIT` sobre un tipo primitivo.
+/// `[n] IMPLICIT` over a primitive type.
 pub fn implicit_primitive(n: u8, content: &[u8]) -> Vec<u8> {
     tlv(0x80 | n, content)
 }
 
-/// `BIT STRING` sin bits sobrantes.
+/// `BIT STRING` with no unused bits.
 pub fn bit_string(bytes: &[u8]) -> Vec<u8> {
     let mut content = Vec::with_capacity(bytes.len() + 1);
     content.push(0x00);
@@ -146,7 +146,7 @@ pub fn ia5_string(s: &str) -> Vec<u8> {
     tlv(TAG_IA5_STRING, s.as_bytes())
 }
 
-/// `INTEGER` no negativo, en su forma minima.
+/// Non-negative `INTEGER`, in its minimal form.
 pub fn integer_u64(v: u64) -> Vec<u8> {
     let bytes = v.to_be_bytes();
     let first = bytes
@@ -161,13 +161,13 @@ pub fn integer_u64(v: u64) -> Vec<u8> {
     tlv(TAG_INTEGER, &content)
 }
 
-/// Un `INTEGER` no negativo que quepa en `u64`.
+/// A non-negative `INTEGER` that fits in a `u64`.
 pub fn decode_integer_u64(content: &[u8]) -> Result<u64, DerError> {
     if content.is_empty() || content[0] & 0x80 != 0 {
         return Err(DerError::BadInteger);
     }
     if content.len() > 1 && content[0] == 0 && content[1] & 0x80 == 0 {
-        return Err(DerError::BadInteger); // no minimo
+        return Err(DerError::BadInteger); // non-minimal
     }
     let digits = if content[0] == 0 {
         &content[1..]
@@ -184,7 +184,7 @@ pub fn decode_integer_u64(content: &[u8]) -> Result<u64, DerError> {
     Ok(v)
 }
 
-/// Base 128 de un subidentificador, big-endian, bit alto de continuacion.
+/// Base 128 of one subidentifier, big-endian, high bit as continuation.
 pub fn base128(v: u64, out: &mut Vec<u8>) {
     let mut tmp = [0u8; 10];
     let mut i = tmp.len();
@@ -203,17 +203,17 @@ pub fn base128(v: u64, out: &mut Vec<u8>) {
     }
 }
 
-/// Lee una secuencia base 128 entera (varios subidentificadores).
+/// Reads a whole base 128 sequence (several subidentifiers).
 pub fn decode_base128(content: &[u8]) -> Result<Vec<u64>, DerError> {
     let mut out = Vec::new();
     let mut acc: u64 = 0;
     let mut in_progress = false;
     for b in content {
         if !in_progress && *b == 0x80 {
-            return Err(DerError::BadOid); // relleno no minimo
+            return Err(DerError::BadOid); // non-minimal padding
         }
         if acc >> 57 != 0 {
-            return Err(DerError::BadOid); // desbordaria
+            return Err(DerError::BadOid); // would overflow
         }
         acc = (acc << 7) | (*b & 0x7f) as u64;
         in_progress = b & 0x80 != 0;
@@ -228,9 +228,9 @@ pub fn decode_base128(content: &[u8]) -> Result<Vec<u64>, DerError> {
     Ok(out)
 }
 
-/// El contenido de un `OBJECT IDENTIFIER` absoluto.
+/// The content of an absolute `OBJECT IDENTIFIER`.
 pub fn oid_content(arcs: &[u64]) -> Vec<u8> {
-    assert!(arcs.len() >= 2, "un OID tiene al menos dos arcos");
+    assert!(arcs.len() >= 2, "an OID has at least two arcs");
     let mut out = Vec::new();
     base128(arcs[0] * 40 + arcs[1], &mut out);
     for a in &arcs[2..] {
@@ -247,19 +247,19 @@ pub fn relative_oid(content: &[u8]) -> Vec<u8> {
     tlv(TAG_RELATIVE_OID, content)
 }
 
-/// `AlgorithmIdentifier { algorithm, parameters omitidos }`.
+/// `AlgorithmIdentifier { algorithm, parameters omitted }`.
 pub fn algorithm_identifier(arcs: &[u64]) -> Vec<u8> {
     sequence(&oid(arcs))
 }
 
-/// El `AlgorithmIdentifier` de `id-alg-mtcProof`, sin parametros.
+/// The `AlgorithmIdentifier` of `id-alg-mtcProof`, without parameters.
 pub fn alg_id_mtc_proof() -> Vec<u8> {
     algorithm_identifier(&oid_alg_mtc_proof())
 }
 
-// ───────────────────────── tiempo ─────────────────────────
+// ───────────────────────── time ─────────────────────────
 
-/// Dias desde 1970-01-01 de una fecha civil (algoritmo de Hinnant).
+/// Days since 1970-01-01 of a civil date (Hinnant's algorithm).
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -270,7 +270,7 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146097 + doe as i64 - 719468
 }
 
-/// Fecha civil de un numero de dias desde 1970-01-01.
+/// Civil date of a number of days since 1970-01-01.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
@@ -284,8 +284,8 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-/// Un instante POSIX como `Time` de RFC 5280: `UTCTime` hasta 2049,
-/// `GeneralizedTime` desde 2050.
+/// A POSIX instant as an RFC 5280 `Time`: `UTCTime` through 2049,
+/// `GeneralizedTime` from 2050 on.
 pub fn time(posix: u64) -> Vec<u8> {
     let days = (posix / 86_400) as i64;
     let secs = posix % 86_400;
@@ -311,7 +311,7 @@ fn digits(s: &[u8]) -> Result<u64, DerError> {
     Ok(v)
 }
 
-/// Un `Time` de RFC 5280 a POSIX.
+/// An RFC 5280 `Time` to POSIX.
 pub fn decode_time(t: &Tlv<'_>) -> Result<u64, DerError> {
     let (year, rest) = match t.tag {
         TAG_UTC_TIME if t.content.len() == 13 => {
@@ -334,9 +334,9 @@ pub fn decode_time(t: &Tlv<'_>) -> Result<u64, DerError> {
     let hh = digits(&rest[4..6])?;
     let mm = digits(&rest[6..8])?;
     let ss = digits(&rest[8..10])?;
-    // RFC 5280 no admite segundos intercalares (00-59) y un dia que no
-    // existe (30 de febrero) no debe convertirse en silencio en el 2 de marzo:
-    // se exige que la fecha civil de vuelta sea la misma.
+    // RFC 5280 does not allow leap seconds (00-59), and a day that does not
+    // exist (February 30) must not silently become March 2: the civil date
+    // is required to round-trip to the same value.
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 59 {
         return Err(DerError::BadTime);
     }
@@ -344,17 +344,17 @@ pub fn decode_time(t: &Tlv<'_>) -> Result<u64, DerError> {
     if civil_from_days(days) != (year as i64, m, d) {
         return Err(DerError::BadTime);
     }
-    // Anteriores a 1970 (UTCTime 1950-1969): un certificado no las lleva, y
-    // un `u64` no las representa. Fallo cerrado.
+    // Before 1970 (UTCTime 1950-1969): no certificate carries them, and a
+    // `u64` cannot represent them. Fail closed.
     if days < 0 {
         return Err(DerError::BadTime);
     }
     Ok(days as u64 * 86_400 + hh * 3600 + mm * 60 + ss)
 }
 
-// ───────────────────────── lectura ─────────────────────────
+// ───────────────────────── reading ─────────────────────────
 
-/// Un elemento DER leido: su etiqueta, su contenido y el TLV entero.
+/// A DER element as read: its tag, its content and the whole TLV.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tlv<'a> {
     pub tag: u8,
@@ -362,14 +362,14 @@ pub struct Tlv<'a> {
     pub raw: &'a [u8],
 }
 
-/// Lee el primer TLV de `input` (etiquetas de un byte, longitud definida).
+/// Reads the first TLV of `input` (single-byte tags, definite length).
 pub fn read_tlv(input: &[u8]) -> Result<(Tlv<'_>, &[u8]), DerError> {
     if input.len() < 2 {
         return Err(DerError::Truncated);
     }
     let tag = input[0];
     if tag & 0x1f == 0x1f {
-        return Err(DerError::BadLength); // etiquetas largas: fuera de alcance
+        return Err(DerError::BadLength); // long-form tags: out of scope
     }
     let (len, header) = if input[1] < 0x80 {
         (input[1] as usize, 2)
@@ -379,17 +379,17 @@ pub fn read_tlv(input: &[u8]) -> Result<(Tlv<'_>, &[u8]), DerError> {
             return Err(DerError::BadLength);
         }
         if input[2] == 0 {
-            return Err(DerError::BadLength); // no minima
+            return Err(DerError::BadLength); // non-minimal
         }
         let mut len: u64 = 0;
         for b in &input[2..2 + n] {
-            len = (len << 8) | *b as u64; // n <= 8: no desborda
+            len = (len << 8) | *b as u64; // n <= 8: cannot overflow
         }
         if len < 0x80 {
-            return Err(DerError::BadLength); // cabia en forma corta
+            return Err(DerError::BadLength); // would have fit in short form
         }
-        // ⚠️ Un `len` cercano a 2^64 no puede sumarse a `header` sin
-        //    desbordar: lo que no cabe en el buffer es, simplemente, truncado.
+        // ⚠️ A `len` close to 2^64 cannot be added to `header` without
+        //    overflowing: whatever does not fit in the buffer is, simply, truncated.
         let len = usize::try_from(len).map_err(|_| DerError::Truncated)?;
         (len, 2 + n)
     };
@@ -408,7 +408,7 @@ pub fn read_tlv(input: &[u8]) -> Result<(Tlv<'_>, &[u8]), DerError> {
     ))
 }
 
-/// Lee un TLV y exige una etiqueta.
+/// Reads a TLV and requires a given tag.
 pub fn expect_tlv(input: &[u8], tag: u8) -> Result<(Tlv<'_>, &[u8]), DerError> {
     let (t, rest) = read_tlv(input)?;
     if t.tag != tag {
@@ -422,18 +422,18 @@ pub fn expect_tlv(input: &[u8], tag: u8) -> Result<(Tlv<'_>, &[u8]), DerError> {
 
 // ───────────────────────── X.509 ─────────────────────────
 
-/// **El `Name` de un CA ID** (seccion «Certification Authority
-/// Identifiers»): un solo RDN con un solo atributo `id-rdna-trustAnchorID`
-/// cuyo valor es la `RELATIVE-OID` del identificador. Va como `issuer` de
-/// cada entrada y de cada certificado, y como `subject` del certificado
-/// de la CA.
+/// **The `Name` of a CA ID** (section "Certification Authority
+/// Identifiers"): a single RDN with a single `id-rdna-trustAnchorID`
+/// attribute whose value is the identifier's `RELATIVE-OID`. It goes as the
+/// `issuer` of every entry and every certificate, and as the `subject` of
+/// the CA's certificate.
 pub fn name_from_ca_id(ca_id: &TrustAnchorId) -> Vec<u8> {
     let mut attr = oid(&oid_rdna_trust_anchor_id());
     attr.extend(relative_oid(&ca_id.to_binary()));
     sequence(&set(&sequence(&attr)))
 }
 
-/// Lee el CA ID de un `Name` compuesto por [`name_from_ca_id`].
+/// Reads the CA ID from a `Name` composed by [`name_from_ca_id`].
 pub fn ca_id_from_name(name: &[u8]) -> Result<TrustAnchorId, DerError> {
     let (seq, rest) = expect_tlv(name, TAG_SEQUENCE)?;
     if !rest.is_empty() {
@@ -458,10 +458,10 @@ pub fn ca_id_from_name(name: &[u8]) -> Result<TrustAnchorId, DerError> {
     TrustAnchorId::from_binary(val.content).map_err(|_| DerError::BadOid)
 }
 
-/// Un `Extensions` con una sola extension `subjectAltName` de nombres DNS,
-/// marcada critica (RFC 5280 lo exige si el `subject` va vacio, que es el
-/// caso habitual en TLS). Ayuda para pruebas y demostraciones: una CA real
-/// recibe las extensiones de su capa de validacion.
+/// An `Extensions` with a single `subjectAltName` extension of DNS names,
+/// marked critical (RFC 5280 requires it if the `subject` is empty, which is
+/// the usual case in TLS). A helper for tests and demonstrations: a real CA
+/// receives its extensions from its validation layer.
 pub fn san_dns_extensions(names: &[&str]) -> Vec<u8> {
     let mut general_names = Vec::new();
     for n in names {
@@ -474,7 +474,7 @@ pub fn san_dns_extensions(names: &[&str]) -> Vec<u8> {
     sequence(&sequence(&ext))
 }
 
-/// Los campos de un `TBSCertificate`, troceados sin interpretar.
+/// The fields of a `TBSCertificate`, split up without interpretation.
 #[derive(Debug, Clone, Copy)]
 pub struct TbsFields<'a> {
     pub version: Option<Tlv<'a>>,
@@ -484,12 +484,12 @@ pub struct TbsFields<'a> {
     pub validity: Tlv<'a>,
     pub subject: Tlv<'a>,
     pub spki: Tlv<'a>,
-    /// Todo lo que sigue al `subjectPublicKeyInfo`: los identificadores
-    /// unicos y las extensiones, tal cual.
+    /// Everything that follows the `subjectPublicKeyInfo`: the unique
+    /// identifiers and the extensions, as they are.
     pub after_spki: &'a [u8],
 }
 
-/// Trocea el `TBSCertificate` (el SEQUENCE entero, con su cabecera).
+/// Splits the `TBSCertificate` (the whole SEQUENCE, with its header).
 pub fn parse_tbs(tbs: &[u8]) -> Result<TbsFields<'_>, DerError> {
     let (seq, rest) = expect_tlv(tbs, TAG_SEQUENCE)?;
     if !rest.is_empty() {
@@ -509,7 +509,7 @@ pub fn parse_tbs(tbs: &[u8]) -> Result<TbsFields<'_>, DerError> {
     let (validity, after) = expect_tlv(after, TAG_SEQUENCE)?;
     let (subject, after) = expect_tlv(after, TAG_SEQUENCE)?;
     let (spki, after_spki) = expect_tlv(after, TAG_SEQUENCE)?;
-    // Lo que sigue ha de ser una secuencia bien formada de [1], [2], [3].
+    // What follows must be a well-formed sequence of [1], [2], [3].
     let mut tail = after_spki;
     let mut last = 0u8;
     while !tail.is_empty() {
@@ -536,7 +536,7 @@ pub fn parse_tbs(tbs: &[u8]) -> Result<TbsFields<'_>, DerError> {
     })
 }
 
-/// El `algorithm` de un `SubjectPublicKeyInfo`, como TLV entero.
+/// The `algorithm` of a `SubjectPublicKeyInfo`, as a whole TLV.
 pub fn spki_algorithm(spki: &[u8]) -> Result<&[u8], DerError> {
     let (seq, rest) = expect_tlv(spki, TAG_SEQUENCE)?;
     if !rest.is_empty() {
@@ -547,13 +547,13 @@ pub fn spki_algorithm(spki: &[u8]) -> Result<&[u8], DerError> {
     Ok(alg.raw)
 }
 
-/// Las tres partes de un `Certificate`.
+/// The three parts of a `Certificate`.
 #[derive(Debug, Clone, Copy)]
 pub struct CertificateParts<'a> {
     pub tbs: Tlv<'a>,
     pub signature_algorithm: Tlv<'a>,
-    /// El contenido del `BIT STRING`, ya sin el byte de bits sobrantes
-    /// (que ha de ser cero).
+    /// The content of the `BIT STRING`, already without the unused-bits byte
+    /// (which must be zero).
     pub signature_value: &'a [u8],
 }
 
@@ -569,7 +569,7 @@ pub fn parse_certificate(der: &[u8]) -> Result<CertificateParts<'_>, DerError> {
         return Err(DerError::TrailingData);
     }
     if sig.content.is_empty() || sig.content[0] != 0 {
-        return Err(DerError::BadLength); // el MTCProof va en bytes enteros
+        return Err(DerError::BadLength); // the MTCProof is in whole bytes
     }
     Ok(CertificateParts {
         tbs,
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn ca_id_name_matches_the_example_of_the_draft() {
-        // "1.3.6.1.4.1.44363.47.3=#0d0481fd5901" para el CA ID 32473.1.
+        // "1.3.6.1.4.1.44363.47.3=#0d0481fd5901" for the CA ID 32473.1.
         let ca = TrustAnchorId::new(vec![32473, 1]).unwrap();
         let name = name_from_ca_id(&ca);
         assert!(hex(&name).ends_with("0d0481fd5901"));
@@ -636,14 +636,14 @@ mod tests {
                 String::from_utf8_lossy(t.content)
             );
         }
-        // 2049-12-31T23:59:59Z aun es UTCTime; 2050-01-01 ya es GeneralizedTime.
+        // 2049-12-31T23:59:59Z is still UTCTime; 2050-01-01 is already GeneralizedTime.
         assert_eq!(time(2_524_607_999)[0], TAG_UTC_TIME);
         assert_eq!(time(2_524_608_000)[0], TAG_GENERALIZED_TIME);
     }
 
-    /// Nada de lo que llega por el cable puede hacer que el lector entre en
-    /// panico: longitudes largas que desbordan, indefinidas, no minimas,
-    /// contenido truncado, restos.
+    /// Nothing that arrives over the wire may make the reader panic:
+    /// long lengths that overflow, indefinite ones, non-minimal ones,
+    /// truncated content, leftovers.
     #[test]
     fn malformed_der_fails_closed() {
         let cases: [(&[u8], DerError); 9] = [
@@ -652,16 +652,16 @@ mod tests {
                 DerError::Truncated,
             ),
             (&[0x30, 0x84, 0xff, 0xff, 0xff, 0xff], DerError::Truncated),
-            (&[0x30, 0x80, 0x00, 0x00], DerError::BadLength), // indefinida
-            (&[0x30, 0x81, 0x05, 1, 2, 3, 4, 5], DerError::BadLength), // cabia en forma corta
-            (&[0x30, 0x82, 0x00, 0x80, 0x00], DerError::BadLength), // no minima
+            (&[0x30, 0x80, 0x00, 0x00], DerError::BadLength), // indefinite
+            (&[0x30, 0x81, 0x05, 1, 2, 3, 4, 5], DerError::BadLength), // would have fit in short form
+            (&[0x30, 0x82, 0x00, 0x80, 0x00], DerError::BadLength),    // non-minimal
             (
                 &[0x30, 0x89, 1, 2, 3, 4, 5, 6, 7, 8, 9],
                 DerError::BadLength,
-            ), // mas de 8 bytes
+            ), // more than 8 bytes
             (&[0x30, 0x05, 1, 2], DerError::Truncated),
             (&[0x30], DerError::Truncated),
-            (&[0x1f, 0x01, 0x00], DerError::BadLength), // etiqueta larga
+            (&[0x1f, 0x01, 0x00], DerError::BadLength), // long-form tag
         ];
         for (input, err) in cases {
             assert_eq!(read_tlv(input).err(), Some(err), "{}", hex(input));
@@ -684,7 +684,7 @@ mod tests {
                 found: 0x05
             })
         );
-        // Un BIT STRING con bits sobrantes no es un MTCProof.
+        // A BIT STRING with unused bits is not an MTCProof.
         let mut cert = sequence(&[]);
         cert.extend(sequence(&[]));
         cert.extend(tlv(TAG_BIT_STRING, &[0x03, 0xaa]));
@@ -692,7 +692,7 @@ mod tests {
             parse_certificate(&sequence(&cert)).err(),
             Some(DerError::BadLength)
         );
-        // Enteros negativos o no minimos.
+        // Negative or non-minimal integers.
         assert_eq!(decode_integer_u64(&[0x80]), Err(DerError::BadInteger));
         assert_eq!(decode_integer_u64(&[0x00, 0x01]), Err(DerError::BadInteger));
         assert_eq!(decode_integer_u64(&[0x01; 9]), Err(DerError::BadInteger));
@@ -702,14 +702,14 @@ mod tests {
     #[test]
     fn impossible_dates_are_rejected() {
         for bad in [
-            "230230120000Z", // 30 de febrero
-            "230229120000Z", // 2023 no es bisiesto
-            "231301120000Z", // mes 13
-            "230101120060Z", // segundo 60
-            "230101240000Z", // hora 24
-            "23010112000Z",  // corto
-            "230101120000",  // sin Z
-            "691231235959Z", // 1969: anterior a la epoca
+            "230230120000Z", // February 30
+            "230229120000Z", // 2023 is not a leap year
+            "231301120000Z", // month 13
+            "230101120060Z", // second 60
+            "230101240000Z", // hour 24
+            "23010112000Z",  // too short
+            "230101120000",  // no Z
+            "691231235959Z", // 1969: before the epoch
         ] {
             let enc = tlv(TAG_UTC_TIME, bad.as_bytes());
             let (t, _) = read_tlv(&enc).unwrap();
@@ -717,7 +717,7 @@ mod tests {
         }
         let leap = tlv(TAG_GENERALIZED_TIME, b"20240229120000Z");
         let (t, _) = read_tlv(&leap).unwrap();
-        assert!(decode_time(&t).is_ok()); // 2024 si es bisiesto
+        assert!(decode_time(&t).is_ok()); // 2024 is a leap year
         let pre_epoch = tlv(TAG_GENERALIZED_TIME, b"19690101000000Z");
         let (t, _) = read_tlv(&pre_epoch).unwrap();
         assert_eq!(decode_time(&t), Err(DerError::BadTime));

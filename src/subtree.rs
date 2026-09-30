@@ -1,60 +1,60 @@
-//! # Subarboles, pruebas de inclusion y pruebas de consistencia
+//! # Subtrees, inclusion proofs and consistency proofs
 //!
-//! La traduccion a MTC de `zk-ssl-verify::mmr` (§291 de Arqueo): alli
-//! vivian `MTH`, `PATH` y `SUBPROOF` de RFC 6962 sobre las primitivas de
-//! la casa; aqui viven los mismos tres algoritmos sobre SHA-256 y
-//! **extendidos a subarboles `[start, end)`**, que es lo que el borrador
-//! anade a RFC 9162 (seccion «Subtrees»).
+//! The MTC translation of `zk-ssl-verify::mmr` (§291 of Arqueo): there
+//! lived `MTH`, `PATH` and `SUBPROOF` from RFC 6962 over the in-house
+//! primitives; here live the same three algorithms over SHA-256 and
+//! **extended to subtrees `[start, end)`**, which is what the draft adds
+//! to RFC 9162 (section "Subtrees").
 //!
-//! ⚠️ **Generacion y verificacion comparten la misma particion** del
-//! arbol —`k = la mayor potencia de dos < n`— pero no la misma forma: la
-//! generacion es la recursion de RFC 9162 sobre un proveedor de hashes, y
-//! la verificacion es el recorrido iterativo por bits del borrador
-//! (`fn`, `sn`, `tn`), que no necesita el arbol. Lo que las ata es que el
-//! verificador exige consumir el camino **entero**: un camino con sobras o
-//! con faltas no pasa. Los cuatro vectores acumulados del borrador
-//! (`tests/vectors.rs`) lo comprueban para todos los subarboles de todos
-//! los arboles hasta 130 hojas, y los vectores grandes
-//! (`tests/large_vectors.rs`) para arboles de hasta 2^64-1.
+//! ⚠️ **Generation and verification share the same partition** of the
+//! tree —`k = the largest power of two < n`— but not the same shape:
+//! generation is the RFC 9162 recursion over a hash provider, and
+//! verification is the draft's iterative bit walk (`fn`, `sn`, `tn`),
+//! which does not need the tree. What ties them together is that the
+//! verifier demands consuming the **whole** path: a path with leftovers or
+//! with gaps does not pass. The four accumulated vectors from the draft
+//! (`tests/vectors.rs`) check this for every subtree of every tree up to
+//! 130 leaves, and the large vectors (`tests/large_vectors.rs`) for trees
+//! of up to 2^64-1.
 //!
-//! ## El proveedor de hashes
+//! ## The hash provider
 //!
-//! Los algoritmos de generacion no saben si el arbol esta en memoria como
-//! lista de hojas o como log con nodos en cache: piden `MTH(D[a:b])` a un
-//! [`TreeHashes`]. [`LeafHashes`] es la implementacion de referencia (la
-//! recursion literal, O(n)); [`crate::log::IssuanceLog`] es la de
-//! produccion (O(log n) para subarboles validos). Un test cruza las dos
-//! para todos los subarboles hasta 130 hojas: dos caminos del mismo
-//! contrato, atados por un test y no fiados a que coincidan.
+//! The generation algorithms do not know whether the tree is in memory as
+//! a list of leaves or as a log with cached nodes: they ask a
+//! [`TreeHashes`] for `MTH(D[a:b])`. [`LeafHashes`] is the reference
+//! implementation (the literal recursion, O(n)); [`crate::log::IssuanceLog`]
+//! is the production one (O(log n) for valid subtrees). A test crosses the
+//! two for every subtree up to 130 leaves: two routes to the same contract,
+//! tied by a test and not trusted to coincide.
 
 use crate::hash::{hash_empty, hash_node, HashValue};
 
-/// Un subarbol `[start, end)` de un log, en las coordenadas del log.
+/// A subtree `[start, end)` of a log, in the log's coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Subtree {
     pub start: u64,
     pub end: u64,
 }
 
-/// Lo que puede ir mal con un subarbol o con una prueba.
+/// What can go wrong with a subtree or with a proof.
 ///
-/// ⚠️ Tres cosas distintas con tres significados distintos, como en
-/// `zk-ssl-verify::inclusion`: un intervalo que no es subarbol o un camino
-/// descuadrado son **una prueba mal formada**; un hash que no sale es
-/// **una entrada que no estaba** (o un subarbol de OTRO log).
+/// ⚠️ Three different things with three different meanings, as in
+/// `zk-ssl-verify::inclusion`: an interval that is not a subtree or a
+/// misaligned path are **a malformed proof**; a hash that does not come
+/// out is **an entry that was not there** (or a subtree of ANOTHER log).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubtreeError {
-    /// `[start, end)` no cumple la definicion de subarbol.
+    /// `[start, end)` does not satisfy the subtree definition.
     InvalidSubtree { start: u64, end: u64 },
-    /// El indice no cae en `[start, end)`.
+    /// The index does not fall in `[start, end)`.
     IndexOutOfSubtree { index: u64, start: u64, end: u64 },
-    /// El subarbol termina mas alla del tamano del arbol.
+    /// The subtree ends beyond the tree size.
     SubtreeBeyondTree { end: u64, tree_size: u64 },
-    /// El camino se acabo antes de llegar a la cima.
+    /// The path ran out before reaching the root.
     ProofTooShort,
-    /// Sobran hashes en el camino.
+    /// There are leftover hashes in the path.
     ProofTooLong,
-    /// El camino sube a otro hash.
+    /// The path climbs to a different hash.
     HashMismatch,
 }
 
@@ -62,27 +62,27 @@ impl core::fmt::Display for SubtreeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SubtreeError::InvalidSubtree { start, end } => {
-                write!(f, "[{start}, {end}) no es un subarbol valido")
+                write!(f, "[{start}, {end}) is not a valid subtree")
             }
             SubtreeError::IndexOutOfSubtree { index, start, end } => {
-                write!(f, "el indice {index} no cae en [{start}, {end})")
+                write!(f, "index {index} does not fall in [{start}, {end})")
             }
             SubtreeError::SubtreeBeyondTree { end, tree_size } => {
                 write!(
                     f,
-                    "el subarbol termina en {end} y el arbol tiene {tree_size} hojas"
+                    "the subtree ends at {end} and the tree has {tree_size} leaves"
                 )
             }
-            SubtreeError::ProofTooShort => write!(f, "el camino se acaba antes de la cima"),
-            SubtreeError::ProofTooLong => write!(f, "sobran hashes en el camino"),
-            SubtreeError::HashMismatch => write!(f, "el camino sube a otro hash"),
+            SubtreeError::ProofTooShort => write!(f, "the path ends before the root"),
+            SubtreeError::ProofTooLong => write!(f, "leftover hashes in the path"),
+            SubtreeError::HashMismatch => write!(f, "the path climbs to a different hash"),
         }
     }
 }
 
 impl std::error::Error for SubtreeError {}
 
-/// `BIT_CEIL(n)` para `n <= 2^63`: la menor potencia de dos `>= n`.
+/// `BIT_CEIL(n)` for `n <= 2^63`: the smallest power of two `>= n`.
 fn bit_ceil(n: u64) -> u64 {
     if n <= 1 {
         1
@@ -91,15 +91,15 @@ fn bit_ceil(n: u64) -> u64 {
     }
 }
 
-/// La mayor potencia de dos **estrictamente** menor que `n` (`n >= 2`).
-/// Es la particion de RFC 9162, compartida por generacion y verificacion.
+/// The largest power of two **strictly** less than `n` (`n >= 2`).
+/// It is the RFC 9162 partition, shared by generation and verification.
 pub fn largest_power_of_two_below(n: u64) -> u64 {
     debug_assert!(n >= 2);
     1u64 << (63 - (n - 1).leading_zeros())
 }
 
-/// La definicion de subarbol del borrador, con la guarda de desbordamiento
-/// de su ejemplo en C++: `start <= end` y `start` multiplo de
+/// The draft's subtree definition, with the overflow guard from its C++
+/// example: `start <= end` and `start` a multiple of
 /// `BIT_CEIL(end - start)`.
 pub fn is_valid_subtree(start: u64, end: u64) -> bool {
     if start > end {
@@ -107,13 +107,13 @@ pub fn is_valid_subtree(start: u64, end: u64) -> bool {
     }
     let size = end - start;
     if size > (1u64 << 63) {
-        return start == 0; // bit_ceil desbordaria
+        return start == 0; // bit_ceil would overflow
     }
     (start & (bit_ceil(size) - 1)) == 0
 }
 
 impl Subtree {
-    /// Un subarbol comprobado.
+    /// A checked subtree.
     pub fn new(start: u64, end: u64) -> Result<Self, SubtreeError> {
         if is_valid_subtree(start, end) {
             Ok(Subtree { start, end })
@@ -122,7 +122,7 @@ impl Subtree {
         }
     }
 
-    /// Re-comprueba la definicion (un `Subtree` puede venir de un decode).
+    /// Re-checks the definition (a `Subtree` may come from a decode).
     pub fn check(&self) -> Result<(), SubtreeError> {
         Subtree::new(self.start, self.end).map(|_| ())
     }
@@ -146,27 +146,27 @@ impl core::fmt::Display for Subtree {
     }
 }
 
-/// **Los dos subarboles que cubren eficientemente `[start, end)`**
-/// (seccion «Selecting Two Subtrees»). Es lo que la CA firma en cada
-/// checkpoint: el intervalo de entradas nuevas desde el anterior, cubierto
-/// por dos subarboles validos cuyo camino de inclusion no es mayor que el
-/// de `MTH(D[start:end])` y que SI se pueden probar consistentes con el
-/// arbol entero.
+/// **The two subtrees that efficiently cover `[start, end)`**
+/// (section "Selecting Two Subtrees"). It is what the CA signs at each
+/// checkpoint: the interval of new entries since the previous one, covered
+/// by two valid subtrees whose inclusion path is no longer than that of
+/// `MTH(D[start:end])` and which CAN be proven consistent with the whole
+/// tree.
 ///
-/// Devuelve `(izquierdo, derecho)` con `left.start <= start <= left.end =
+/// Returns `(left, right)` with `left.start <= start <= left.end =
 /// right.start <= end = right.end`.
 pub fn covering_subtrees(start: u64, end: u64) -> (Subtree, Subtree) {
-    assert!(start <= end, "intervalo invertido");
+    assert!(start <= end, "inverted interval");
     if end - start <= 1 {
         return (Subtree { start, end }, Subtree { start: end, end });
     }
     let last = end - 1;
-    // Donde divergen los caminos de `start` y `last`: la altura del corte.
+    // Where the paths of `start` and `last` diverge: the height of the cut.
     let split = 63 - (start ^ last).leading_zeros();
     let mask = (1u64 << split) - 1;
     let mid = last & !mask;
-    // El izquierdo se ensancha hasta justo antes de que el camino de
-    // `start` abandone el borde derecho de su nuevo subarbol.
+    // The left one widens until just before the path of `start` leaves
+    // the right edge of its new subtree.
     let left_split = 64 - (!start & mask).leading_zeros();
     let left_start = start & !((1u64 << left_split) - 1);
     (
@@ -178,22 +178,22 @@ pub fn covering_subtrees(start: u64, end: u64) -> (Subtree, Subtree) {
     )
 }
 
-/// Quien sabe calcular `MTH(D[start:end])` sobre un arbol de `size` hojas.
+/// Whoever knows how to compute `MTH(D[start:end])` over a tree of `size` leaves.
 pub trait TreeHashes {
-    /// Cuantas hojas tiene el arbol.
+    /// How many leaves the tree has.
     fn size(&self) -> u64;
-    /// `MTH(D[start:end])` para `0 <= start <= end <= size`. **No** exige
-    /// que el intervalo sea un subarbol valido.
+    /// `MTH(D[start:end])` for `0 <= start <= end <= size`. Does **not**
+    /// require the interval to be a valid subtree.
     fn range_hash(&self, start: u64, end: u64) -> HashValue;
 }
 
-/// La implementacion de referencia: las hojas ya hasheadas, y la recursion
-/// literal de RFC 9162. O(n) por consulta; para tests y para atar la de
-/// produccion.
+/// The reference implementation: the leaves already hashed, and the
+/// literal RFC 9162 recursion. O(n) per query; for tests and for tying
+/// down the production one.
 #[derive(Clone, Debug, Default)]
 pub struct LeafHashes(pub Vec<HashValue>);
 
-/// `MTH` de RFC 9162 sobre hojas **ya hasheadas** (`MTH({d}) = HASH(0x00 || d)`).
+/// RFC 9162 `MTH` over **already-hashed** leaves (`MTH({d}) = HASH(0x00 || d)`).
 pub fn mth(leaves: &[HashValue]) -> HashValue {
     match leaves.len() {
         0 => hash_empty(),
@@ -225,8 +225,8 @@ fn check_in_tree<T: TreeHashes + ?Sized>(tree: &T, subtree: Subtree) -> Result<(
     Ok(())
 }
 
-/// **La prueba de inclusion** de la entrada `index` en el subarbol
-/// (`PATH` de RFC 9162 sobre `D[start:end]`). A lo sumo
+/// **The inclusion proof** of entry `index` in the subtree
+/// (RFC 9162 `PATH` over `D[start:end]`). At most
 /// `BIT_WIDTH(size - 1)` hashes.
 pub fn inclusion_proof<T: TreeHashes + ?Sized>(
     tree: &T,
@@ -246,7 +246,7 @@ pub fn inclusion_proof<T: TreeHashes + ?Sized>(
     Ok(out)
 }
 
-/// `PATH(m, D[lo:hi])` en coordenadas absolutas del log.
+/// `PATH(m, D[lo:hi])` in absolute log coordinates.
 fn path<T: TreeHashes + ?Sized>(tree: &T, m: u64, lo: u64, hi: u64, out: &mut Vec<HashValue>) {
     let n = hi - lo;
     if n == 1 {
@@ -262,11 +262,11 @@ fn path<T: TreeHashes + ?Sized>(tree: &T, m: u64, lo: u64, hi: u64, out: &mut Ve
     }
 }
 
-/// **Evalua** una prueba de inclusion: devuelve el hash de subarbol que
-/// esa prueba reconstruye desde `entry_hash` (seccion «Evaluating a
-/// Subtree Inclusion Proof»), sin compararlo con nada. Es lo que el
-/// verificador de certificados necesita: el hash esperado se compara
-/// despues contra un subarbol de confianza o contra las cofirmas.
+/// **Evaluates** an inclusion proof: returns the subtree hash that the
+/// proof reconstructs from `entry_hash` (section "Evaluating a Subtree
+/// Inclusion Proof"), without comparing it against anything. It is what
+/// the certificate verifier needs: the expected hash is compared afterwards
+/// against a trusted subtree or against the cosignatures.
 pub fn evaluate_inclusion_proof(
     entry_hash: &HashValue,
     subtree: Subtree,
@@ -306,7 +306,7 @@ pub fn evaluate_inclusion_proof(
     Ok(r)
 }
 
-/// **Verifica** una prueba de inclusion contra un hash de subarbol conocido.
+/// **Verifies** an inclusion proof against a known subtree hash.
 pub fn verify_inclusion_proof(
     entry_hash: &HashValue,
     subtree: Subtree,
@@ -322,9 +322,9 @@ pub fn verify_inclusion_proof(
     }
 }
 
-/// **La prueba de consistencia** del subarbol con el arbol de `n` hojas
-/// (`SUBTREE_PROOF` del borrador). Con `start = 0` es la prueba de
-/// consistencia de RFC 9162; con `end = start + 1`, la de inclusion.
+/// **The consistency proof** of the subtree with the tree of `n` leaves
+/// (the draft's `SUBTREE_PROOF`). With `start = 0` it is the RFC 9162
+/// consistency proof; with `end = start + 1`, the inclusion proof.
 pub fn consistency_proof<T: TreeHashes + ?Sized>(
     tree: &T,
     n: u64,
@@ -351,7 +351,7 @@ pub fn consistency_proof<T: TreeHashes + ?Sized>(
     Ok(out)
 }
 
-/// `SUBTREE_SUBPROOF(start, end, D[lo:hi], b)` en coordenadas absolutas.
+/// `SUBTREE_SUBPROOF(start, end, D[lo:hi], b)` in absolute coordinates.
 fn subproof<T: TreeHashes + ?Sized>(
     tree: &T,
     s: u64,
@@ -375,16 +375,16 @@ fn subproof<T: TreeHashes + ?Sized>(
         subproof(tree, s, e, lo + k, hi, b, out);
         out.push(tree.range_hash(lo, lo + k));
     } else {
-        // s < lo + k < e, lo que implica s == lo: el subarbol se parte por
-        // el mismo k que el arbol, y su hijo izquierdo es MTH(D[lo:lo+k]).
+        // s < lo + k < e, which implies s == lo: the subtree splits at the
+        // same k as the tree, and its left child is MTH(D[lo:lo+k]).
         subproof(tree, lo + k, e, lo + k, hi, false, out);
         out.push(tree.range_hash(lo, lo + k));
     }
 }
 
-/// **Verifica** una prueba de consistencia (seccion «Verifying a Subtree
-/// Consistency Proof»): que `root_hash`, de `n` hojas, CONTIENE al
-/// subarbol con hash `node_hash`.
+/// **Verifies** a consistency proof (section "Verifying a Subtree
+/// Consistency Proof"): that `root_hash`, of `n` leaves, CONTAINS the
+/// subtree with hash `node_hash`.
 pub fn verify_consistency_proof(
     n: u64,
     subtree: Subtree,
@@ -473,18 +473,18 @@ mod tests {
 
     #[test]
     fn examples_from_the_draft() {
-        // [4, 8) y [8, 13) son subarboles; [1, 5) no.
+        // [4, 8) and [8, 13) are subtrees; [1, 5) is not.
         assert!(is_valid_subtree(4, 8));
         assert!(is_valid_subtree(8, 13));
         assert!(!is_valid_subtree(1, 5));
         assert!(is_valid_subtree(0, 0));
         assert!(is_valid_subtree(7, 7));
-        // [5, 13) se cubre con [4, 8) y [8, 13).
+        // [5, 13) is covered by [4, 8) and [8, 13).
         assert_eq!(
             covering_subtrees(5, 13),
             (Subtree { start: 4, end: 8 }, Subtree { start: 8, end: 13 })
         );
-        // El intervalo [7, 9) de la figura del contraejemplo.
+        // The interval [7, 9) from the counterexample figure.
         assert_eq!(
             covering_subtrees(7, 9),
             (Subtree { start: 7, end: 8 }, Subtree { start: 8, end: 9 })
@@ -496,7 +496,7 @@ mod tests {
         let t = tree(13);
         let st = Subtree::new(8, 13).unwrap();
         let p = inclusion_proof(&t, st, 10).unwrap();
-        // MTH({d[11]}), MTH(D[8:10]), MTH({d[12]}): la figura del borrador.
+        // MTH({d[11]}), MTH(D[8:10]), MTH({d[12]}): the figure from the draft.
         assert_eq!(p, vec![t.0[11], t.range_hash(8, 10), t.0[12]]);
         assert_eq!(
             evaluate_inclusion_proof(&t.0[10], st, 10, &p).unwrap(),
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn consistency_examples_from_the_draft() {
         let t = tree(14);
-        // [4, 8) en un arbol de 14: MTH(D[0:4]) y MTH(D[8:14]).
+        // [4, 8) in a tree of 14: MTH(D[0:4]) and MTH(D[8:14]).
         let p = consistency_proof(&t, 14, Subtree::new(4, 8).unwrap()).unwrap();
         assert_eq!(p, vec![t.range_hash(0, 4), t.range_hash(8, 14)]);
         verify_consistency_proof(
@@ -518,7 +518,7 @@ mod tests {
             &t.range_hash(0, 14),
         )
         .unwrap();
-        // [8, 13) en un arbol de 14: d[12], d[13], MTH(D[8:12]), MTH(D[0:8]).
+        // [8, 13) in a tree of 14: d[12], d[13], MTH(D[8:12]), MTH(D[0:8]).
         let p = consistency_proof(&t, 14, Subtree::new(8, 13).unwrap()).unwrap();
         assert_eq!(
             p,
@@ -532,7 +532,7 @@ mod tests {
             &t.range_hash(0, 14),
         )
         .unwrap();
-        // Con start = 0 es la consistencia de RFC 9162; con size 1, la inclusion.
+        // With start = 0 it is RFC 9162 consistency; with size 1, inclusion.
         let p = consistency_proof(&t, 14, Subtree::new(0, 6).unwrap()).unwrap();
         verify_consistency_proof(
             14,

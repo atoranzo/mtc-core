@@ -1,49 +1,49 @@
-//! # El guardian: persistir ANTES de firmar
+//! # The guard: persist BEFORE signing
 //!
-//! `hbs-state` es **el guardian del indice de las firmas basadas en hashes
-//! con estado**, extraido de `zk-ssl-guardian` (§296 de Arqueo): un
-//! contador monotono persistido con `fsync`, que se niega a operar donde
-//! `fsync` no persiste (tmpfs) y que reconcilia el estado tras un
-//! reinicio en cuatro casos, de los que solo uno es fatal.
+//! `hbs-state` is **the index guard for stateful hash-based
+//! signatures**, extracted from `zk-ssl-guardian` (§296 of Arqueo): a
+//! monotonic counter persisted with `fsync`, which refuses to operate where
+//! `fsync` does not persist (tmpfs) and which reconciles its state after a
+//! restart in four cases, of which only one is fatal.
 //!
-//! ⚠️ **No es un gestor del estado del arbol**, y conviene decirlo porque
-//! la hipotesis de partida lo describia asi. Lo que aporta a una CA de
-//! MTC es el **invariante**, que aqui aplica dos veces:
+//! ⚠️ **It is not a tree-state manager**, and it is worth saying so because
+//! the initial hypothesis described it that way. What it brings to an MTC
+//! CA is the **invariant**, which applies twice here:
 //!
-//! 1. **El numero de checkpoint.** La CA persiste el numero del checkpoint
-//!    que va a firmar ANTES de firmarlo. Si el proceso muere entre medias,
-//!    el numero queda huerfano (caso normal, `CounterAhead`); si al
-//!    arrancar el diario del log va por delante del contador (`KeyAhead`),
-//!    alguien firmo sin pasar por el guardian y **no se arranca**.
+//! 1. **The checkpoint number.** The CA persists the number of the checkpoint
+//!    it is about to sign BEFORE signing it. If the process dies in between,
+//!    the number is left orphaned (normal case, `CounterAhead`); if at
+//!    start-up the log's journal is ahead of the counter (`KeyAhead`),
+//!    someone signed without going through the guard and **we do not start**.
 //!
-//!    ⚠️ **Lo que protege, dicho con precision:** el numero NO entra en el
-//!    mensaje firmado (el `CosignedMessage` del borrador no tiene sitio para
-//!    el), asi que el guardian **no impide** que la CA firme dos vistas
-//!    distintas del log: eso lo detectan los testigos con pruebas de
-//!    consistencia, y es su papel. Lo que el guardian da es un **registro
-//!    duradero, anterior a cada firma**, con el que al arrancar se sabe
-//!    cuantas firmas de checkpoint pudieron salir y cuantas anoto el diario,
-//!    para reconstruir el log hasta un estado que las cubra y no publicar
-//!    una vista incoherente por descuido. Es el mismo invariante que en XMSS
-//!    y la misma reconciliacion; lo que cambia es la consecuencia de
-//!    romperlo: alli se filtra una clave, aqui se pierde la confianza.
-//! 2. **El indice de firma**, si el cofirmante de la CA es XMSS/LMS: ahi
-//!    se usa tal cual, como en `FirmanteCabeza`.
+//!    ⚠️ **What it protects, stated precisely:** the number does NOT go into
+//!    the signed message (the draft's `CosignedMessage` has no room for
+//!    it), so the guard **does not prevent** the CA from signing two
+//!    different views of the log: witnesses detect that with consistency
+//!    proofs, and that is their role. What the guard gives is a **durable
+//!    record, prior to each signature**, with which at start-up one knows
+//!    how many checkpoint signatures may have gone out and how many the
+//!    journal recorded, in order to rebuild the log up to a state that covers
+//!    them and not publish an inconsistent view by carelessness. It is the
+//!    same invariant as in XMSS and the same reconciliation; what changes is
+//!    the consequence of breaking it: there a key leaks, here trust is lost.
+//! 2. **The signature index**, if the CA's cosigner is XMSS/LMS: there it
+//!    is used as is, as in `FirmanteCabeza`.
 //!
-//! [`SequenceGuard`] es la interfaz minima que la CA necesita;
-//! `hbs_state::IndexGuard` la implementa sin adaptador, y [`MemoryGuard`]
-//! existe **solo para tests**: no persiste nada y lo dice.
+//! [`SequenceGuard`] is the minimal interface the CA needs;
+//! `hbs_state::IndexGuard` implements it without an adapter, and [`MemoryGuard`]
+//! exists **only for tests**: it persists nothing and says so.
 
 pub use hbs_state::{is_fatal, reconcile_values, GuardError, IndexGuard, Reconciliation};
 
-/// Un contador monotono cuyo valor reservado sobrevive al proceso.
+/// A monotonic counter whose reserved value survives the process.
 pub trait SequenceGuard {
-    /// Persiste `current + 1` y lo devuelve; **solo entonces** se firma.
+    /// Persists `current + 1` and returns it; **only then** is anything signed.
     fn reserve(&mut self) -> Result<u64, GuardError>;
-    /// El ultimo valor persistido. Nunca retrocede.
+    /// The last persisted value. Never goes backwards.
     fn current(&self) -> u64;
-    /// Compara el contador con lo que el diario del log dice haber
-    /// publicado. Solo `KeyAhead` es fatal ([`is_fatal`]).
+    /// Compares the counter with what the log's journal claims to have
+    /// published. Only `KeyAhead` is fatal ([`is_fatal`]).
     fn reconcile(&self, observed: u64) -> Reconciliation {
         reconcile_values(self.current(), observed)
     }
@@ -58,8 +58,8 @@ impl SequenceGuard for IndexGuard {
     }
 }
 
-/// ⚠️ **No persiste.** Para tests y para medir sin disco. Una CA que
-/// arranque con esto reutilizara numeros de checkpoint tras cada caida.
+/// ⚠️ **Does not persist.** For tests and for measuring without disk. A CA
+/// that starts with this will reuse checkpoint numbers after every crash.
 #[derive(Debug, Default)]
 pub struct MemoryGuard {
     current: u64,
@@ -70,7 +70,7 @@ impl SequenceGuard for MemoryGuard {
         self.current = self
             .current
             .checked_add(1)
-            .ok_or_else(|| GuardError::Io("el contador desbordo".into()))?;
+            .ok_or_else(|| GuardError::Io("the counter overflowed".into()))?;
         Ok(self.current)
     }
     fn current(&self) -> u64 {
@@ -202,14 +202,14 @@ mod tests {
         let mut g = MemoryGuard::default();
         assert_eq!(g.reserve().unwrap(), 1);
         assert_eq!(g.reserve().unwrap(), 2);
-        // El diario publico el 2: en sincronia.
+        // The journal published 2: in sync.
         assert!(!is_fatal(&g.reconcile(2)));
-        // El diario se quedo en el 1: huerfano, caso normal tras caida.
+        // The journal stopped at 1: orphan, the normal case after a crash.
         assert!(matches!(
             g.reconcile(1),
             Reconciliation::CounterAhead { orphans: 1, .. }
         ));
-        // El diario dice 3 y el contador 2: alguien firmo sin reservar.
+        // The journal says 3 and the counter 2: someone signed without reserving.
         assert!(is_fatal(&g.reconcile(3)));
     }
 }

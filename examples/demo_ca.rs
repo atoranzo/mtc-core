@@ -1,7 +1,7 @@
-//! De extremo a extremo, con cifras: una CA con ML-DSA-44 y un testigo,
-//! ocho solicitudes, dos checkpoints, un landmark, y los dos certificados
-//! de una misma entrada —standalone y relativo a landmark— verificados por
-//! una parte que confia que NO compila la CA (solo `verify`).
+//! End to end, with numbers: a CA with ML-DSA-44 and a witness, eight
+//! requests, two checkpoints, one landmark, and the two certificates of a
+//! single entry -- standalone and landmark-relative -- verified by a relying
+//! party that does NOT compile the CA (only `verify`).
 //!
 //!     cargo run --release --example demo_ca
 
@@ -16,7 +16,7 @@ fn main() {
     let now = 1_800_000_000u64;
     let week = 7 * 86_400;
 
-    // ── la CA y su testigo ──
+    // ── the CA and its witness ──
     let ca_id = TrustAnchorId::from_ascii("32473.1").unwrap();
     let witness_id = TrustAnchorId::from_ascii("32473.77").unwrap();
     let ca_signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id.clone(), [1u8; 32]);
@@ -25,11 +25,11 @@ fn main() {
         ca_signer.verifying_key_bytes(),
         witness.verifying_key_bytes(),
     );
-    println!("clave publica ML-DSA-44 de la CA: {} bytes", ca_key.len());
+    println!("CA's ML-DSA-44 public key: {} bytes", ca_key.len());
 
-    // ⚠️ MemoryGuard NO persiste: en produccion, `hbs_state::IndexGuard::open(ruta)`.
-    // Las firmas ML-DSA llevan sal (variante recomendada de FIPS 204): dos
-    // ejecuciones dan certificados distintos que verifican igual.
+    // ⚠️ MemoryGuard does NOT persist: in production, `hbs_state::IndexGuard::open(path)`.
+    // ML-DSA signatures are salted (the FIPS 204 recommended variant): two
+    // runs yield different certificates that verify all the same.
     let cfg = CaConfig {
         ca_id: ca_id.clone(),
         log_number: 1,
@@ -39,9 +39,9 @@ fn main() {
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();
     ca.add_cosigner(Box::new(witness)).unwrap();
 
-    // ── 1-3a · solicitudes ya validadas entran en el log ──
+    // ── 1-3a · already-validated requests enter the log ──
     for i in 0..8u8 {
-        let mut spki = der::algorithm_identifier(&[1, 3, 101, 112]); // un SPKI de juguete
+        let mut spki = der::algorithm_identifier(&[1, 3, 101, 112]); // a toy SPKI
         spki.extend(der::bit_string(&[i; 32]));
         let index = ca
             .submit(CertificateRequest {
@@ -56,10 +56,10 @@ fn main() {
             })
             .unwrap();
         if index == 4 {
-            // ── 3b-4 · el primer checkpoint cubre [0, 5) ──
+            // ── 3b-4 · the first checkpoint covers [0, 5) ──
             let cp = ca.run_checkpoint_job(now).unwrap().unwrap();
             println!(
-                "checkpoint {} · tree_size {} · subarboles {:?}",
+                "checkpoint {} · tree_size {} · subtrees {:?}",
                 cp.number,
                 cp.tree_size,
                 cp.subtrees
@@ -71,7 +71,7 @@ fn main() {
     }
     let cp = ca.run_checkpoint_job(now + 2).unwrap().unwrap();
     println!(
-        "checkpoint {} · tree_size {} · subarboles {:?} · raiz {}",
+        "checkpoint {} · tree_size {} · subtrees {:?} · root {}",
         cp.number,
         cp.tree_size,
         cp.subtrees
@@ -81,35 +81,35 @@ fn main() {
         der::hex(&cp.root)
     );
 
-    // ── 5 · el certificado standalone de la entrada 6 ──
+    // ── 5 · the standalone certificate of entry 6 ──
     let standalone = ca.standalone_certificate(6).unwrap();
     let standalone_der = standalone.to_der().unwrap();
     println!(
-        "standalone(6): subarbol {} · {} hashes · {} cofirmas · {} bytes DER",
+        "standalone(6): subtree {} · {} hashes · {} cosignatures · {} DER bytes",
         standalone.proof.subtree,
         standalone.proof.inclusion_proof.len(),
         standalone.proof.signatures.len(),
         standalone_der.len()
     );
 
-    // ── landmark y certificado relativo ──
+    // ── landmark and landmark-relative certificate ──
     let l = ca.allocate_landmark(now + 3).unwrap().unwrap();
     println!(
-        "landmark {} · tree_size {} · caduca {}",
+        "landmark {} · tree_size {} · expires {}",
         l.number, l.tree_size, l.expiry
     );
     let relative = ca.landmark_relative_certificate(6).unwrap();
     let relative_der = relative.to_der().unwrap();
     println!(
-        "relativo(6): subarbol {} · {} hashes · {} cofirmas · {} bytes DER",
+        "relative(6): subtree {} · {} hashes · {} cosignatures · {} DER bytes",
         relative.proof.subtree,
         relative.proof.inclusion_proof.len(),
         relative.proof.signatures.len(),
         relative_der.len()
     );
-    print!("landmarks publicados:\n{}", ca.landmarks().publish(now + 5));
+    print!("published landmarks:\n{}", ca.landmarks().publish(now + 5));
 
-    // ── la parte que confia ──
+    // ── the relying party ──
     let cosigners: Vec<CosignerEntry> = vec![
         (
             ca_id.clone(),
@@ -133,18 +133,18 @@ fn main() {
     let rp = RelyingPartyConfig {
         ca_id,
         cosigners,
-        required_cosigners: vec![witness_id], // la de la CA se exige siempre
+        required_cosigners: vec![witness_id], // the CA's is always required
         trusted_subtrees: trusted,
         revoked_ranges: vec![],
     };
     let v = verify_certificate(&standalone_der, &rp, now + 5).unwrap();
     println!(
-        "standalone verificado: indice {} · base {:?}",
+        "standalone verified: index {} · basis {:?}",
         v.index, v.basis
     );
     let v = verify_certificate(&relative_der, &rp, now + 5).unwrap();
     println!(
-        "relativo verificado:   indice {} · base {:?}",
+        "relative verified:   index {} · basis {:?}",
         v.index, v.basis
     );
 }

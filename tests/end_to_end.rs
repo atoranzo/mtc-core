@@ -1,5 +1,5 @@
-//! De la solicitud al certificado y del certificado a la parte que confia,
-//! con ML-DSA-44 en la CA y en un testigo.
+//! From the request to the certificate and from the certificate to the
+//! relying party, with ML-DSA-44 at the CA and at a witness.
 #![cfg(feature = "ml-dsa")]
 
 use mtc_core::ca::CaError;
@@ -98,13 +98,13 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
     }
     assert_eq!(
         w.ca.standalone_certificate(0).err().map(|e| e.to_string()),
-        Some("la entrada 0 aun no esta bajo un checkpoint".into())
+        Some("entry 0 is not yet under a checkpoint".into())
     );
 
     let cp =
         w.ca.run_checkpoint_job(NOW)
             .unwrap()
-            .expect("hay entradas nuevas");
+            .expect("there are new entries");
     assert_eq!((cp.number, cp.tree_size), (1, 5));
     assert_eq!(cp.root, w.ca.log().root());
     let covered: Vec<Subtree> = cp.subtrees.iter().map(|s| s.subtree).collect();
@@ -115,7 +115,7 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
     assert!(cp.subtrees.iter().all(|s| s.signatures.len() == 2));
     assert!(
         w.ca.run_checkpoint_job(NOW + 1).unwrap().is_none(),
-        "sin entradas nuevas no hay checkpoint"
+        "no new entries, no checkpoint"
     );
 
     let cfg = rp(&w, vec![]);
@@ -137,8 +137,8 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
             }
         );
         assert_eq!(MtcCertificate::from_der(&der).unwrap(), cert);
-        // Dos firmas ML-DSA-44 dominan el tamano: el certificado standalone
-        // es grande, el relativo a landmark (mas abajo) no.
+        // Two ML-DSA-44 signatures dominate the size: the standalone
+        // certificate is large, the landmark-relative one (below) is not.
         assert!(
             der.len() > 2 * 2420 && der.len() < 2 * 2420 + 600,
             "{}",
@@ -146,8 +146,8 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         );
     }
 
-    // Manipular el SAN cambia la entrada, el hash esperado y, con el, la
-    // cofirma de la CA deja de cuadrar.
+    // Tampering with the SAN changes the entry, the expected hash and, with
+    // it, the CA's cosignature no longer matches.
     let cert = w.ca.standalone_certificate(2).unwrap();
     let mut tampered = cert.clone();
     let pos = tampered.tbs_certificate.len() - 3;
@@ -156,7 +156,7 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         verify_certificate(&tampered.to_der().unwrap(), &cfg, NOW),
         Err(VerifyError::BadCosignature(w.ca_id.clone()))
     );
-    // Sin la cofirma del testigo, la politica no se cumple.
+    // Without the witness's cosignature, the policy is not met.
     let mut without_witness = cert.clone();
     without_witness
         .proof
@@ -166,17 +166,17 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         verify_certificate(&without_witness.to_der().unwrap(), &cfg, NOW),
         Err(VerifyError::MissingCosignature(w.witness_id.clone()))
     );
-    // Un indice de otra entrada con esta prueba sube a otro hash.
+    // Another entry's index with this proof climbs to a different hash.
     let mut other_index = cert.clone();
     other_index.proof.inclusion_proof = w.ca.log().inclusion_proof(cert.proof.subtree, 3).unwrap();
     assert_eq!(
         verify_certificate(&other_index.to_der().unwrap(), &cfg, NOW),
         Err(VerifyError::BadCosignature(w.ca_id.clone()))
     );
-    // Revocado por rango, caducado, aun no valido, emisor desconocido.
+    // Revoked by range, expired, not yet valid, unknown issuer.
     let der = cert.to_der().unwrap();
     let mut revoked = rp(&w, vec![]);
-    revoked.revoked_ranges = vec![(1u64 << 48, (1u64 << 48) + 2)]; // inclusivo: llega al 2
+    revoked.revoked_ranges = vec![(1u64 << 48, (1u64 << 48) + 2)]; // inclusive: reaches 2
     assert_eq!(
         verify_certificate(&der, &revoked, NOW),
         Err(VerifyError::Revoked((1u64 << 48) | 2))
@@ -195,8 +195,8 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         verify_certificate(&der, &other_ca, NOW),
         Err(VerifyError::UnknownIssuer)
     );
-    // La cofirma de la CA se exige SIEMPRE, aunque la politica no la liste;
-    // y sin ella no hay certificado, tenga los testigos que tenga.
+    // The CA's cosignature is ALWAYS required, even if the policy does not
+    // list it; and without it there is no certificate, whatever witnesses it has.
     let mut only_ca = rp(&w, vec![]);
     only_ca.required_cosigners.clear();
     let v = verify_certificate(&der, &only_ca, NOW).unwrap();
@@ -210,7 +210,7 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         verify_certificate(&without_ca.to_der().unwrap(), &only_ca, NOW),
         Err(VerifyError::MissingCosignature(w.ca_id.clone()))
     );
-    // Una cofirma de un ID desconocido (GREASE) se ignora, no invalida.
+    // A cosignature from an unknown ID (GREASE) is ignored, not invalidating.
     let mut greased = cert.clone();
     greased.proof.signatures.push(mtc_core::SubtreeSignature {
         cosigner_id: TrustAnchorId::from_binary(&[0x8f, 0xff, 0x7f]).unwrap(),
@@ -223,8 +223,8 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
     assert!(verify_certificate(&greased.to_der().unwrap(), &cfg, NOW).is_ok());
 }
 
-/// Lo que la CA comprueba al entrar: validez, forma DER, extensiones de
-/// entrada; y lo que no admite al configurarse: IDs de cofirmante mal puestos.
+/// What the CA checks on the way in: validity, DER form, entry extensions;
+/// and what it does not accept when configured: misplaced cosigner IDs.
 #[test]
 fn the_ca_refuses_what_it_could_not_certify() {
     let mut w = world();
@@ -293,9 +293,9 @@ fn the_ca_refuses_what_it_could_not_certify() {
             mtc_core::entry::EntryError::UnknownExtension(1)
         ))
     ));
-    assert_eq!(w.ca.log().size(), 0, "nada de eso entro en el log");
+    assert_eq!(w.ca.log().size(), 0, "none of that entered the log");
 
-    // Un cofirmante externo con el ID de la CA, o repetido, no se admite.
+    // An external cosigner with the CA's ID, or a repeated one, is not accepted.
     let dup = MlDsaCosigner::<MlDsa44>::from_seed(w.ca_id.clone(), [9u8; 32]);
     assert!(matches!(
         w.ca.add_cosigner(Box::new(dup)),
@@ -306,7 +306,7 @@ fn the_ca_refuses_what_it_could_not_certify() {
         w.ca.add_cosigner(Box::new(again)),
         Err(CaError::DuplicateCosigner(_))
     ));
-    // Y una CA cuyo cofirmante no lleva su ID no arranca.
+    // And a CA whose cosigner does not carry its ID does not start.
     let other = MlDsaCosigner::<MlDsa44>::from_seed(
         TrustAnchorId::from_ascii("32473.2").unwrap(),
         [9u8; 32],
@@ -322,13 +322,13 @@ fn the_ca_refuses_what_it_could_not_certify() {
     ));
 }
 
-/// La caducidad de un landmark cubre el mayor `notAfter` de lo que tiene
-/// debajo, aunque sea posterior a `now + vida maxima`.
+/// A landmark's expiry covers the largest `notAfter` of what lies beneath
+/// it, even if it is later than `now + max lifetime`.
 #[test]
 fn a_landmark_never_expires_before_the_entries_it_covers() {
     let mut w = world();
     w.ca.submit(request(1)).unwrap();
-    // Una validez que empieza dentro de tres dias y dura una semana.
+    // A validity that starts in three days and lasts a week.
     let future = CertificateRequest {
         validity: Validity {
             not_before: NOW + 3 * 86_400,
@@ -339,9 +339,9 @@ fn a_landmark_never_expires_before_the_entries_it_covers() {
     w.ca.submit(future).unwrap();
     w.ca.run_checkpoint_job(NOW).unwrap().unwrap();
     let l = w.ca.allocate_landmark(NOW).unwrap().unwrap();
-    assert_eq!(l.expiry, NOW + 10 * 86_400, "no NOW + WEEK");
+    assert_eq!(l.expiry, NOW + 10 * 86_400, "not NOW + WEEK");
     assert!(w.ca.landmarks().active(NOW + 9 * 86_400).next().is_some());
-    // Recortar los subarboles firmados de lo ya cubierto.
+    // Prune the signed subtrees of what is already covered.
     assert_eq!(w.ca.prune_signed_subtrees_below(2), 2);
     assert!(matches!(
         w.ca.standalone_certificate(1),
@@ -368,13 +368,13 @@ fn landmark_relative_certificates_carry_no_signatures() {
         vec![Subtree { start: 5, end: 6 }, Subtree { start: 6, end: 8 }]
     );
 
-    // Antes del landmark no hay certificado relativo.
+    // Before the landmark there is no landmark-relative certificate.
     assert!(w.ca.landmark_relative_certificate(6).is_err());
     let l = w.ca.allocate_landmark(NOW + 3).unwrap().unwrap();
     assert_eq!((l.number, l.tree_size, l.expiry), (1, 8, NOW + 3 + WEEK));
     assert!(
         w.ca.allocate_landmark(NOW + 4).unwrap().is_none(),
-        "el arbol no crecio"
+        "the tree did not grow"
     );
     assert_eq!(
         w.ca.landmarks().publish(NOW + 5),
@@ -406,27 +406,27 @@ fn landmark_relative_certificates_carry_no_signatures() {
     let updated = rp(&w, trusted.clone());
     let v = verify_certificate(&der, &updated, NOW + 5).unwrap();
     assert_eq!((v.index, v.basis), (6, Basis::TrustedSubtree));
-    // Una parte que confia sin el landmark no puede aceptarlo: no hay firmas.
+    // A relying party without the landmark cannot accept it: there are no signatures.
     let stale = rp(&w, vec![]);
     assert_eq!(
         verify_certificate(&der, &stale, NOW + 5),
         Err(VerifyError::MissingCosignature(w.ca_id.clone()))
     );
-    // Y con un hash de landmark equivocado, tampoco.
+    // And with a wrong landmark hash, neither.
     let mut wrong = trusted;
     wrong[1].hash[0] ^= 1;
     assert_eq!(
         verify_certificate(&der, &rp(&w, wrong), NOW + 5),
         Err(VerifyError::TrustedSubtreeMismatch)
     );
-    // El standalone de la misma entrada sigue valiendo para ambas.
+    // The standalone certificate of the same entry remains valid for both.
     let standalone = w.ca.standalone_certificate(6).unwrap().to_der().unwrap();
     assert!(verify_certificate(&standalone, &updated, NOW + 5).is_ok());
     assert!(verify_certificate(&standalone, &stale, NOW + 5).is_ok());
 }
 
-/// El guardian de `hbs-state`, de verdad y en disco: el numero de
-/// checkpoint se persiste antes de firmar, y al reabrir se reconcilia.
+/// The `hbs-state` guard, for real and on disk: the checkpoint number is
+/// persisted before signing, and on reopening it is reconciled.
 #[test]
 fn the_checkpoint_number_is_persisted_before_signing() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("guardian");
@@ -434,17 +434,17 @@ fn the_checkpoint_number_is_persisted_before_signing() {
     let _ = std::fs::remove_file(&path);
     let guard = match IndexGuard::open(&path) {
         Ok(g) => g,
-        // tmpfs u otro sistema donde fsync no persiste: el guardian se
-        // niega, que es su trabajo; este test no puede medir ahi, y lo dice.
-        // Cualquier OTRO error es un fallo del test.
+        // tmpfs or another filesystem where fsync does not persist: the guard
+        // refuses, which is its job; this test cannot measure there, and says so.
+        // Any OTHER error is a test failure.
         Err(GuardError::FakePersistence { ratio, .. }) => {
             eprintln!(
-                "SALTADO: fsync no persiste en {} (ratio {ratio})",
+                "SKIPPED: fsync does not persist at {} (ratio {ratio})",
                 path.display()
             );
             return;
         }
-        Err(e) => panic!("no se pudo abrir el guardian en {}: {e}", path.display()),
+        Err(e) => panic!("could not open the guard at {}: {e}", path.display()),
     };
     let ca_id = TrustAnchorId::from_ascii("32473.1").unwrap();
     let signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id.clone(), [3u8; 32]);
@@ -459,9 +459,9 @@ fn the_checkpoint_number_is_persisted_before_signing() {
     assert_eq!(cp.number, 1);
     assert_eq!(ca.guard().current(), 1);
     drop(ca);
-    // Reabrir: el contador sobrevivio. Si el diario del log dice que se
-    // publico el 1, en sincronia; si dice 0, huerfano (caso normal tras
-    // una caida entre reservar y firmar); si dijera 2, fatal.
+    // Reopen: the counter survived. If the log's journal says 1 was
+    // published, in sync; if it says 0, orphaned (the normal case after a
+    // crash between reserving and signing); if it said 2, fatal.
     let reopened = IndexGuard::open(&path).unwrap();
     assert_eq!(reopened.current(), 1);
     assert!(matches!(

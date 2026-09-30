@@ -1,53 +1,54 @@
-//! # Identificadores de ancla de confianza (`TrustAnchorID`)
+//! # Trust anchor identifiers (`TrustAnchorID`)
 //!
-//! El CA ID, los ID de log (`caID.0.N`), de landmark (`caID.1.N.L`) y de
-//! grupo de landmarks (`caID.2.N.L`), y el ID de cada cofirmante, son
-//! todos *trust anchor IDs* de `draft-ietf-tls-trust-anchor-ids`: una
-//! `RELATIVE-OID` bajo el arco `1.3.6.1.4.1` (los PEN de IANA). Tienen
-//! tres representaciones y las tres viven aqui, con una sola definicion:
+//! The CA ID, the log IDs (`caID.0.N`), landmark IDs (`caID.1.N.L`) and
+//! landmark group IDs (`caID.2.N.L`), and the ID of every cosigner, are all
+//! *trust anchor IDs* from `draft-ietf-tls-trust-anchor-ids`: a
+//! `RELATIVE-OID` under the `1.3.6.1.4.1` arc (the IANA PENs). They have
+//! three representations and all three live here, with a single definition:
 //!
-//! - **binaria**, los octetos de contenido de la `RELATIVE-OID`
-//!   (`81 fd 59 01`): la que va en el `MTCProof` y en el `Name`, y **la
-//!   forma canonica que este tipo guarda**;
-//! - **ASCII** `32473.1`, la que va dentro de `oid/1.3.6.1.4.1.32473.1` en
-//!   el `CosignedMessage`;
-//! - el **orden** de la binaria (primero mas corta, luego lexicografica),
-//!   que es el orden canonico de las cofirmas en un `MTCProof`.
+//! - **binary**, the content octets of the `RELATIVE-OID`
+//!   (`81 fd 59 01`): the one that goes in the `MTCProof` and in the `Name`,
+//!   and **the canonical form this type stores**;
+//! - **ASCII** `32473.1`, the one that goes inside `oid/1.3.6.1.4.1.32473.1`
+//!   in the `CosignedMessage`;
+//! - the **ordering** of the binary form (shortest first, then
+//!   lexicographic), which is the canonical order of the cosignatures in an
+//!   `MTCProof`.
 //!
-//! ⚠️ Se guarda la binaria y no los arcos porque un `MTCProof` puede
-//! traer IDs de cofirmantes que la parte que confia **no reconoce** (GREASE
-//! incluido) con arcos de cualquier tamano, y el borrador exige ignorarlos,
-//! no rechazar el certificado. Decodificar arcos a `u64` al leer el cable
-//! convertiria un ID exotico en un fallo de verificacion. Los arcos solo se
-//! interpretan al pedirlos, y el ASCII se produce con aritmetica de
-//! precision arbitraria, asi que ningun ID bien formado deja de tener nombre.
+//! ⚠️ The binary form is stored rather than the arcs because an `MTCProof`
+//! may carry cosigner IDs that the relying party **does not recognize**
+//! (GREASE included) with arcs of any size, and the draft requires ignoring
+//! them, not rejecting the certificate. Decoding arcs into `u64` when reading
+//! from the wire would turn an exotic ID into a verification failure. Arcs
+//! are only interpreted on request, and the ASCII form is produced with
+//! arbitrary-precision arithmetic, so no well-formed ID is left without a name.
 
 use crate::der::DerError;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TrustAnchorId {
-    /// Los octetos de contenido de la `RELATIVE-OID`, base 128.
+    /// The content octets of the `RELATIVE-OID`, base 128.
     binary: Vec<u8>,
 }
 
-/// `TrustAnchorID<1..2^8-1>`: la binaria mide entre 1 y 255 bytes.
+/// `TrustAnchorID<1..2^8-1>`: the binary form is between 1 and 255 bytes.
 pub const MAX_BINARY_LEN: usize = 255;
-/// `cosigner_name<1..2^8-1>` / `log_origin<1..2^8-1>`: el nombre `oid/…`
-/// mide como mucho 255 bytes.
+/// `cosigner_name<1..2^8-1>` / `log_origin<1..2^8-1>`: the `oid/…` name
+/// is at most 255 bytes.
 pub const MAX_NAME_LEN: usize = 255;
 const NAME_PREFIX: &str = "oid/1.3.6.1.4.1.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaiError {
     Empty,
-    /// La representacion binaria no cabe en `TrustAnchorID<1..2^8-1>`.
+    /// The binary representation does not fit in `TrustAnchorID<1..2^8-1>`.
     TooLong(usize),
-    /// El nombre `oid/…` no cabe en `opaque<1..2^8-1>`.
+    /// The `oid/…` name does not fit in `opaque<1..2^8-1>`.
     NameTooLong(usize),
     Der(DerError),
-    /// El ASCII no es una lista de enteros decimales separados por puntos.
+    /// The ASCII is not a list of dot-separated decimal integers.
     NotAscii,
-    /// Un arco no cabe en `u64` (solo al pedir `arcs()`).
+    /// An arc does not fit in `u64` (only when requesting `arcs()`).
     ArcTooLarge,
 }
 
@@ -59,8 +60,8 @@ impl core::fmt::Display for TaiError {
 
 impl std::error::Error for TaiError {}
 
-/// Comprueba la forma base 128: ningun subidentificador truncado ni con
-/// relleno `0x80` inicial. No interpreta los valores.
+/// Checks the base 128 form: no truncated subidentifier and no leading
+/// `0x80` padding. Does not interpret the values.
 fn check_base128(b: &[u8]) -> Result<(), TaiError> {
     let mut in_progress = false;
     for byte in b {
@@ -75,13 +76,13 @@ fn check_base128(b: &[u8]) -> Result<(), TaiError> {
     Ok(())
 }
 
-/// Los subidentificadores como grupos de bytes base 128.
+/// The subidentifiers as groups of base 128 bytes.
 fn subidentifiers(b: &[u8]) -> impl Iterator<Item = &[u8]> {
     b.split_inclusive(|byte| byte & 0x80 == 0)
 }
 
-/// Un subidentificador base 128 como decimal, con precision arbitraria:
-/// division larga repetida sobre los digitos de 7 bits.
+/// A base 128 subidentifier as decimal, with arbitrary precision:
+/// repeated long division over the 7-bit digits.
 fn base128_to_decimal(sub: &[u8]) -> String {
     let mut digits: Vec<u8> = sub.iter().map(|b| b & 0x7f).collect();
     let mut out = Vec::new();
@@ -98,11 +99,11 @@ fn base128_to_decimal(sub: &[u8]) -> String {
         out.push(b'0');
     }
     out.reverse();
-    String::from_utf8(out).expect("digitos ASCII")
+    String::from_utf8(out).expect("ASCII digits")
 }
 
 impl TrustAnchorId {
-    /// Desde los arcos **relativos** a `1.3.6.1.4.1`.
+    /// From the arcs **relative** to `1.3.6.1.4.1`.
     pub fn new(arcs: Vec<u64>) -> Result<Self, TaiError> {
         if arcs.is_empty() {
             return Err(TaiError::Empty);
@@ -114,9 +115,9 @@ impl TrustAnchorId {
         Self::from_binary(&binary)
     }
 
-    /// Desde los octetos de contenido de la `RELATIVE-OID`. Acepta
-    /// cualquier ID bien formado de 1 a 255 bytes, tenga los arcos que
-    /// tenga: es la entrada del cable.
+    /// From the content octets of the `RELATIVE-OID`. Accepts any
+    /// well-formed ID of 1 to 255 bytes, whatever its arcs may be: this is
+    /// the entry point from the wire.
     pub fn from_binary(b: &[u8]) -> Result<Self, TaiError> {
         if b.is_empty() {
             return Err(TaiError::Empty);
@@ -128,8 +129,8 @@ impl TrustAnchorId {
         Ok(TrustAnchorId { binary: b.to_vec() })
     }
 
-    /// Desde `32473.1`. Solo digitos y puntos; sin signos, sin ceros a la
-    /// izquierda, sin componentes vacios.
+    /// From `32473.1`. Only digits and dots; no signs, no leading zeros,
+    /// no empty components.
     pub fn from_ascii(s: &str) -> Result<Self, TaiError> {
         let mut arcs = Vec::new();
         for part in s.split('.') {
@@ -144,7 +145,7 @@ impl TrustAnchorId {
         Self::new(arcs)
     }
 
-    /// Los octetos de contenido de la `RELATIVE-OID`.
+    /// The content octets of the `RELATIVE-OID`.
     pub fn to_binary(&self) -> Vec<u8> {
         self.binary.clone()
     }
@@ -153,7 +154,7 @@ impl TrustAnchorId {
         &self.binary
     }
 
-    /// Los arcos, si todos caben en `u64`.
+    /// The arcs, if they all fit in `u64`.
     pub fn arcs(&self) -> Result<Vec<u64>, TaiError> {
         let mut out = Vec::new();
         for sub in subidentifiers(&self.binary) {
@@ -169,7 +170,7 @@ impl TrustAnchorId {
         Ok(out)
     }
 
-    /// `32473.1`, para cualquier ID bien formado.
+    /// `32473.1`, for any well-formed ID.
     pub fn to_ascii(&self) -> String {
         subidentifiers(&self.binary)
             .map(base128_to_decimal)
@@ -177,8 +178,8 @@ impl TrustAnchorId {
             .join(".")
     }
 
-    /// `oid/1.3.6.1.4.1.32473.1`: el `cosigner_name` / `log_origin` del
-    /// `CosignedMessage`. Falla si no cabe en `opaque<1..2^8-1>`.
+    /// `oid/1.3.6.1.4.1.32473.1`: the `cosigner_name` / `log_origin` of the
+    /// `CosignedMessage`. Fails if it does not fit in `opaque<1..2^8-1>`.
     pub fn oid_name(&self) -> Result<String, TaiError> {
         let name = format!("{NAME_PREFIX}{}", self.to_ascii());
         if name.len() > MAX_NAME_LEN {
@@ -195,7 +196,7 @@ impl TrustAnchorId {
         Self::from_binary(&binary)
     }
 
-    /// `{caID logs(0) N}`: el ID del log `N`.
+    /// `{caID logs(0) N}`: the ID of log `N`.
     pub fn log_id(&self, log_number: u16) -> Result<Self, TaiError> {
         self.child(&[0, log_number as u64])
     }
@@ -210,10 +211,10 @@ impl TrustAnchorId {
         self.child(&[2, log_number as u64, landmark])
     }
 
-    /// Comprueba que el ID sirve como CA ID: que todos sus derivados
-    /// (log, landmark y grupo, con los valores mas largos posibles) caben
-    /// en el cable y en un nombre `oid/…`. Se llama al configurar una CA,
-    /// para fallar al arrancar y no al emitir.
+    /// Checks that the ID can serve as a CA ID: that all of its derived IDs
+    /// (log, landmark and group, with the longest possible values) fit on
+    /// the wire and in an `oid/…` name. Called when configuring a CA, so
+    /// that it fails at startup and not at issuance.
     pub fn check_as_ca_id(&self) -> Result<(), TaiError> {
         self.oid_name()?;
         self.log_id(u16::MAX)?.oid_name()?;
@@ -229,8 +230,8 @@ impl core::fmt::Display for TrustAnchorId {
     }
 }
 
-/// El orden canonico de las cofirmas: por la representacion binaria,
-/// primero las mas cortas y a igual longitud lexicografico.
+/// The canonical order of the cosignatures: by the binary representation,
+/// shortest first and, at equal length, lexicographic.
 impl Ord for TrustAnchorId {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.binary
@@ -278,8 +279,8 @@ mod tests {
         for bad in ["", ".", "1.", "+5", "01", "a", "1..2", " 1"] {
             assert!(TrustAnchorId::from_ascii(bad).is_err(), "{bad:?}");
         }
-        // Un ID del cable con un arco que no cabe en u64 sigue teniendo
-        // nombre y orden; solo `arcs()` se niega.
+        // An ID from the wire with an arc that does not fit in u64 still has
+        // a name and an ordering; only `arcs()` refuses.
         let huge = TrustAnchorId::from_binary(
             &[0xff; 10]
                 .map(|b| b)
@@ -308,7 +309,7 @@ mod tests {
 
     #[test]
     fn decimal_of_large_subidentifiers_is_exact() {
-        // 2^63 = 9223372036854775808 en base 128: un 1 seguido de nueve ceros.
+        // 2^63 = 9223372036854775808 in base 128: a 1 followed by nine zeros.
         let mut b = Vec::new();
         crate::der::base128(1u64 << 63, &mut b);
         assert_eq!(base128_to_decimal(&b), "9223372036854775808");
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn ordering_is_by_length_then_bytes() {
         let a = TrustAnchorId::from_ascii("1").unwrap();
-        let b = TrustAnchorId::from_ascii("200").unwrap(); // dos bytes
+        let b = TrustAnchorId::from_ascii("200").unwrap(); // two bytes
         let c = TrustAnchorId::from_ascii("2").unwrap();
         assert!(a < c && c < b);
     }

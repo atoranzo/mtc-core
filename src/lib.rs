@@ -1,53 +1,53 @@
-//! # `mtc-core` — el backend de una CA de Merkle Tree Certificates
+//! # `mtc-core` — the backend of a Merkle Tree Certificates CA
 //!
-//! Implementa las piezas de `draft-ietf-plants-merkle-tree-certs` (grupo
-//! PLANTS del IETF; la version leida es la de su repositorio de trabajo a
-//! 29-09-2026) que un **backend de CA** y un **verificador** necesitan
-//! compartir, con la misma regla que `zk-ssl-hash` impuso en Arqueo: **una
-//! decision de formato tiene UNA SOLA definicion**, y la usa tanto quien
-//! emite como quien comprueba.
+//! Implements the pieces of `draft-ietf-plants-merkle-tree-certs` (PLANTS
+//! working group of the IETF; the version read is the one in its working
+//! repository as of 2026-09-29) that a **CA backend** and a **verifier**
+//! need to share, under the same rule `zk-ssl-hash` imposed in Arqueo: **a
+//! format decision has ONE SINGLE definition**, used both by whoever issues
+//! and by whoever checks.
 //!
-//! ## Que es y que no es
+//! ## What it is and what it is not
 //!
-//! - Es la adaptacion de la infraestructura de arbol de Arqueo a un log de
-//!   emision RFC 9162: hojas `MTCLogEntry`, subarboles `[start, end)`,
-//!   pruebas de inclusion y de consistencia, cofirmas `subtree/v1`, el
-//!   `MTCProof` que va en el `signatureValue` de un certificado X.509, la
-//!   secuencia de *landmarks* y el flujo de la CA (recibir, anotar en el
-//!   log, firmar el checkpoint, cubrir el intervalo con dos subarboles,
-//!   recoger cofirmas, emitir).
-//! - **No** contiene ZK, ni sumas, ni campo de Goldilocks: el hash es
-//!   SHA-256 y la firma es ML-DSA (o cualquier `Cosigner`).
-//! - **No** es una CA completa: falta ACME, la validacion de dominio, el
-//!   parseo de CSR (PKCS#10) y el servicio del log (tlog-tiles). Cada uno
-//!   entra por una interfaz que este crate ya deja definida.
+//! - It is the adaptation of Arqueo's tree infrastructure to an RFC 9162
+//!   issuance log: `MTCLogEntry` leaves, `[start, end)` subtrees, inclusion
+//!   and consistency proofs, `subtree/v1` cosignatures, the `MTCProof` that
+//!   goes in the `signatureValue` of an X.509 certificate, the *landmark*
+//!   sequence and the CA flow (receive, record in the log, sign the
+//!   checkpoint, cover the interval with two subtrees, collect
+//!   cosignatures, issue).
+//! - It contains **no** ZK, no sums, no Goldilocks field: the hash is
+//!   SHA-256 and the signature is ML-DSA (or any `Cosigner`).
+//! - It is **not** a complete CA: ACME, domain validation, CSR parsing
+//!   (PKCS#10) and the log service (tlog-tiles) are missing. Each one plugs
+//!   in through an interface this crate already defines.
 //!
-//! ## Mapa de modulos y de donde viene cada uno
+//! ## Module map and where each one comes from
 //!
-//! | modulo | que define | procedencia en Arqueo / hbs-state |
+//! | module | what it defines | origin in Arqueo / hbs-state |
 //! |---|---|---|
-//! | [`hash`] | `MTH` de RFC 9162 sobre SHA-256 | sustituye a `zk-ssl-hash::{native_merge, mmr_hoja, mmr_nodo}` |
-//! | [`subtree`] | subarboles, pruebas de inclusion y de consistencia, cobertura de intervalos | traduccion de `zk-ssl-verify::mmr` (MTH/PATH/SUBPROOF) extendida a subarboles |
-//! | [`log`] | el log de emision con nodos internos en cache | la idea de `zk-ssl::sparse_tree` (cache de nodos, O(log n) por escritura) sobre un arbol *append-only* |
-//! | [`entry`] | `MTCLogEntry`, `TBSCertificateLogEntry`, la hoja `MtcLeaf` | sustituye a `native_leaf` `(cuenta, saldo, nonce)` |
-//! | [`cosign`] | `CosignedMessage`, `Cosigner`, ML-DSA | `firma_cabeza::FirmanteCabeza` (reservar, firmar, autocomprobar) |
-//! | [`guard`] | el contador persistido antes de firmar | `hbs-state::IndexGuard`, entero, sin reimplementar |
-//! | [`landmark`] | la secuencia de landmarks y sus dos subarboles | nuevo (no hay equivalente) |
-//! | [`proof`] | `MTCProof` y el certificado X.509 que lo lleva | `zk-ssl-verify::inclusion::ReciboInclusion` (hoja → raiz → cabeza firmada) |
-//! | [`ca`] | el flujo de la CA de extremo a extremo | `zk-ssl-node` (latido + firma de cabeza) |
-//! | [`verify`] | el verificador de la parte que confia | `zk-ssl-verify` (sin compilar el emisor) |
-//! | [`der`] | lo minimo de DER/X.509 que hace falta | nuevo |
+//! | [`hash`] | `MTH` of RFC 9162 over SHA-256 | replaces `zk-ssl-hash::{native_merge, mmr_hoja, mmr_nodo}` |
+//! | [`subtree`] | subtrees, inclusion and consistency proofs, interval coverage | translation of `zk-ssl-verify::mmr` (MTH/PATH/SUBPROOF) extended to subtrees |
+//! | [`log`] | the issuance log with cached internal nodes | the idea of `zk-ssl::sparse_tree` (node cache, O(log n) per write) over an *append-only* tree |
+//! | [`entry`] | `MTCLogEntry`, `TBSCertificateLogEntry`, the `MtcLeaf` leaf | replaces `native_leaf` `(cuenta, saldo, nonce)` |
+//! | [`cosign`] | `CosignedMessage`, `Cosigner`, ML-DSA | `firma_cabeza::FirmanteCabeza` (reserve, sign, self-check) |
+//! | [`guard`] | the counter persisted before signing | `hbs-state::IndexGuard`, whole, not reimplemented |
+//! | [`landmark`] | the landmark sequence and its two subtrees | new (no equivalent) |
+//! | [`proof`] | `MTCProof` and the X.509 certificate that carries it | `zk-ssl-verify::inclusion::ReciboInclusion` (leaf → root → signed head) |
+//! | [`ca`] | the end-to-end CA flow | `zk-ssl-node` (`latido` heartbeat + head signature) |
+//! | [`verify`] | the relying party's verifier | `zk-ssl-verify` (without compiling the issuer) |
+//! | [`der`] | the minimum of DER/X.509 that is needed | new |
 //!
-//! ## Lo que este crate NO promete todavia
+//! ## What this crate does NOT promise yet
 //!
-//! Es un **esqueleto verificado**: los algoritmos del arbol pasan los cuatro
-//! vectores acumulados del borrador (`tests/vectors.rs`, 65.058 casos) y
-//! los vectores grandes de su apendice (`tests/large_vectors.rs`, arboles
-//! de hasta 2^64-1 hojas), y hay un flujo de emision y verificacion de
-//! extremo a extremo con ML-DSA-44 (`tests/end_to_end.rs`). No esta
-//! auditado, no persiste el log a disco (solo el contador del guardian) y
-//! los OID son los experimentales del arco 1.3.6.1.4.1.44363.47 que el
-//! borrador reserva para eso.
+//! It is a **verified skeleton**: the tree algorithms pass the four
+//! accumulated vectors of the draft (`tests/vectors.rs`, 65,058 cases) and
+//! the large vectors of its appendix (`tests/large_vectors.rs`, trees of up
+//! to 2^64-1 leaves), and there is an end-to-end issuance and verification
+//! flow with ML-DSA-44 (`tests/end_to_end.rs`). It is not audited, it does
+//! not persist the log to disk (only the guard's counter), and the OIDs are
+//! the experimental ones from the 1.3.6.1.4.1.44363.47 arc that the draft
+//! reserves for that purpose.
 
 pub mod ca;
 pub mod cosign;

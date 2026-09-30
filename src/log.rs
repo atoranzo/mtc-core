@@ -1,52 +1,51 @@
-//! # El log de emision: un arbol RFC 9162 *append-only* con nodos en cache
+//! # The issuance log: an *append-only* RFC 9162 tree with cached nodes
 //!
-//! Lo que en Arqueo era `zk-ssl::sparse_tree::SparseTree` —un arbol
-//! disperso de profundidad fija con los nodos internos no vacios en un
-//! mapa, O(profundidad) por escritura (§207)— aqui es un arbol **denso y
-//! solo creciente**: los certificados no se sobreescriben ni se borran,
-//! se anaden al final y se revocan por rango de numero de serie. Eso
-//! simplifica la cache: en vez de un mapa `(nivel, indice) -> nodo`, un
-//! vector por nivel con **solo los nodos completos** (los que cubren una
-//! potencia de dos de hojas alineada). Anadir una hoja cuesta O(log n)
-//! hashes amortizado; el hash de cualquier subarbol valido, O(log n)
-//! consultas; la memoria, `2n` hashes.
+//! What in Arqueo was `zk-ssl::sparse_tree::SparseTree` —a sparse tree of
+//! fixed depth with the non-empty internal nodes in a map, O(depth) per
+//! write (§207)— is here a **dense, grow-only** tree: certificates are
+//! neither overwritten nor deleted, they are appended at the end and
+//! revoked by serial-number range. That simplifies the cache: instead of a
+//! `(level, index) -> node` map, one vector per level holding **only the
+//! full nodes** (those covering an aligned power of two of leaves).
+//! Appending a leaf costs O(log n) hashes amortized; the hash of any valid
+//! subtree, O(log n) lookups; memory, `2n` hashes.
 //!
-//! ⚠️ La semantica la fija [`crate::subtree::LeafHashes`], la recursion
-//! literal: un test recorre todos los subarboles de todos los tamanos
-//! hasta 130 y exige el mismo hash y las mismas pruebas por las dos vias.
-//! Es lo que §221 hizo con `rebuild_from` frente a N `set_leaf`.
+//! ⚠️ The semantics are fixed by [`crate::subtree::LeafHashes`], the
+//! literal recursion: a test walks every subtree of every size up to 130
+//! and demands the same hash and the same proofs by both routes. It is what
+//! §221 did with `rebuild_from` against N `set_leaf`.
 //!
-//! ## Lo que este modulo NO hace
+//! ## What this module does NOT do
 //!
-//! No persiste. El log de una CA real vive en disco (Arqueo usa `sled` en
-//! `zk-ssl::persistence`, y el borrador remite a tlog-tiles para servirlo);
-//! aqui [`IssuanceLog::from_entries`] reconstruye la cache desde las
-//! entradas, que es el punto donde engancha cualquier almacen.
+//! It does not persist. A real CA's log lives on disk (Arqueo uses `sled`
+//! in `zk-ssl::persistence`, and the draft points to tlog-tiles to serve
+//! it); here [`IssuanceLog::from_entries`] rebuilds the cache from the
+//! entries, which is the point where any store hooks in.
 
 use crate::entry::MtcLogEntry;
 use crate::hash::{hash_empty, hash_leaf, hash_node, HashValue};
 use crate::subtree::{self, largest_power_of_two_below, Subtree, SubtreeError, TreeHashes};
 
-/// Un log tiene a lo sumo `2^48 - 1` entradas: `index` viaja en 48 bits
-/// dentro del numero de serie y del `MTCProof`.
+/// A log holds at most `2^48 - 1` entries: `index` travels in 48 bits
+/// inside the serial number and the `MTCProof`.
 pub const MAX_ENTRIES: u64 = (1u64 << 48) - 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogError {
-    /// Los numeros de log van de 1 a 65535.
+    /// Log numbers run from 1 to 65535.
     InvalidLogNumber(u16),
-    /// El log esta lleno.
+    /// The log is full.
     Full,
-    /// Una entrada no se pudo codificar.
+    /// An entry could not be encoded.
     Entry(crate::entry::EntryError),
 }
 
 impl core::fmt::Display for LogError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            LogError::InvalidLogNumber(n) => write!(f, "numero de log invalido: {n}"),
-            LogError::Full => write!(f, "el log alcanzo 2^48 - 1 entradas"),
-            LogError::Entry(e) => write!(f, "entrada invalida: {e}"),
+            LogError::InvalidLogNumber(n) => write!(f, "invalid log number: {n}"),
+            LogError::Full => write!(f, "the log reached 2^48 - 1 entries"),
+            LogError::Entry(e) => write!(f, "invalid entry: {e}"),
         }
     }
 }
@@ -59,20 +58,20 @@ impl From<crate::entry::EntryError> for LogError {
     }
 }
 
-/// El log de emision numero `log_number` de una CA.
+/// Issuance log number `log_number` of a CA.
 #[derive(Clone, Debug)]
 pub struct IssuanceLog {
     log_number: u16,
-    /// `levels[0]` son las hojas ya hasheadas; `levels[j][i]` es el nodo
-    /// completo que cubre `[i << j, (i + 1) << j)`. Invariante:
+    /// `levels[0]` are the already-hashed leaves; `levels[j][i]` is the
+    /// full node covering `[i << j, (i + 1) << j)`. Invariant:
     /// `levels[j + 1].len() == levels[j].len() / 2`.
     levels: Vec<Vec<HashValue>>,
-    /// Las entradas serializadas, para servirlas y para reconstruir.
+    /// The serialized entries, to serve them and to rebuild.
     entries: Vec<Vec<u8>>,
 }
 
 impl IssuanceLog {
-    /// Un log vacio.
+    /// An empty log.
     pub fn new(log_number: u16) -> Result<Self, LogError> {
         if log_number == 0 {
             return Err(LogError::InvalidLogNumber(log_number));
@@ -84,9 +83,9 @@ impl IssuanceLog {
         })
     }
 
-    /// **Reconstruye la cache desde las entradas** al arrancar. Es el
-    /// equivalente de `SparseTree::rebuild_from` (§221): quien tenga el
-    /// log en disco lo carga por aqui.
+    /// **Rebuilds the cache from the entries** at startup. It is the
+    /// equivalent of `SparseTree::rebuild_from` (§221): whoever holds the
+    /// log on disk loads it through here.
     pub fn from_entries(
         log_number: u16,
         entries: impl IntoIterator<Item = Vec<u8>>,
@@ -102,19 +101,19 @@ impl IssuanceLog {
         self.log_number
     }
 
-    /// Cuantas entradas hay: el `tree_size` del checkpoint actual.
+    /// How many entries there are: the `tree_size` of the current checkpoint.
     pub fn size(&self) -> u64 {
         self.levels[0].len() as u64
     }
 
-    /// Anade una entrada y devuelve su indice.
+    /// Appends an entry and returns its index.
     pub fn append(&mut self, entry: &MtcLogEntry) -> Result<u64, LogError> {
         self.append_raw(entry.encode()?)
     }
 
-    /// Anade una entrada ya serializada. Se exige que sea una entrada
-    /// bien formada y de tipo conocido: **una CA no anota lo que no
-    /// entiende**, porque luego lo firmaria.
+    /// Appends an already-serialized entry. It must be a well-formed entry
+    /// of a known type: **a CA does not record what it does not
+    /// understand**, because it would sign it afterwards.
     pub fn append_raw(&mut self, entry: Vec<u8>) -> Result<u64, LogError> {
         if self.size() >= MAX_ENTRIES {
             return Err(LogError::Full);
@@ -123,7 +122,7 @@ impl IssuanceLog {
         let index = self.size();
         self.levels[0].push(hash_leaf(&entry));
         self.entries.push(entry);
-        // Sube por los niveles cerrando cada par que se completa.
+        // Climb the levels, closing each pair that becomes complete.
         let mut level = 0;
         loop {
             let len = self.levels[level].len();
@@ -141,19 +140,19 @@ impl IssuanceLog {
         Ok(index)
     }
 
-    /// La entrada serializada en `index`.
+    /// The serialized entry at `index`.
     pub fn entry(&self, index: u64) -> Option<&[u8]> {
         self.entries
             .get(usize::try_from(index).ok()?)
             .map(|v| v.as_slice())
     }
 
-    /// `MTH({entry})` de la entrada en `index`.
+    /// `MTH({entry})` of the entry at `index`.
     pub fn leaf_hash(&self, index: u64) -> Option<HashValue> {
         self.levels[0].get(usize::try_from(index).ok()?).copied()
     }
 
-    /// El nodo completo `(nivel, indice)`, si existe.
+    /// The full node `(level, index)`, if it exists.
     fn full_node(&self, level: usize, idx: u64) -> Option<HashValue> {
         self.levels
             .get(level)?
@@ -161,12 +160,12 @@ impl IssuanceLog {
             .copied()
     }
 
-    /// El hash del checkpoint actual: `MTH(D[0:size])`.
+    /// The hash of the current checkpoint: `MTH(D[0:size])`.
     pub fn root(&self) -> HashValue {
         self.range_hash(0, self.size())
     }
 
-    /// El hash de un subarbol valido del log.
+    /// The hash of a valid subtree of the log.
     pub fn subtree_hash(&self, subtree: Subtree) -> Result<HashValue, SubtreeError> {
         subtree.check()?;
         if subtree.end > self.size() {
@@ -178,7 +177,7 @@ impl IssuanceLog {
         Ok(self.range_hash(subtree.start, subtree.end))
     }
 
-    /// La prueba de inclusion de `index` en `subtree`.
+    /// The inclusion proof of `index` in `subtree`.
     pub fn inclusion_proof(
         &self,
         subtree: Subtree,
@@ -187,12 +186,12 @@ impl IssuanceLog {
         subtree::inclusion_proof(self, subtree, index)
     }
 
-    /// La prueba de consistencia de `subtree` con el checkpoint actual.
+    /// The consistency proof of `subtree` with the current checkpoint.
     pub fn consistency_proof(&self, subtree: Subtree) -> Result<Vec<HashValue>, SubtreeError> {
         subtree::consistency_proof(self, self.size(), subtree)
     }
 
-    /// Diagnostico: cuantos nodos internos completos hay en cache.
+    /// Diagnostics: how many full internal nodes are cached.
     pub fn cached_nodes(&self) -> usize {
         self.levels.iter().skip(1).map(Vec::len).sum()
     }
@@ -203,9 +202,9 @@ impl TreeHashes for IssuanceLog {
         IssuanceLog::size(self)
     }
 
-    /// Para un subarbol valido baja por el borde derecho: O(log n)
-    /// consultas. Para un intervalo cualquiera sigue siendo correcto
-    /// (recursion completa), solo mas caro.
+    /// For a valid subtree it descends along the right edge: O(log n)
+    /// lookups. For an arbitrary interval it is still correct (full
+    /// recursion), just more expensive.
     fn range_hash(&self, start: u64, end: u64) -> HashValue {
         let n = end - start;
         if n == 0 {
@@ -232,7 +231,7 @@ mod tests {
     use super::*;
     use crate::subtree::{is_valid_subtree, LeafHashes};
 
-    /// Entradas nulas distintas: `null_entry` con una extension cuyo dato es `i`.
+    /// Distinct null entries: `null_entry` with an extension whose data is `i`.
     fn raw_entry(i: u64) -> Vec<u8> {
         MtcLogEntry::Null {
             extensions: vec![crate::entry::LogEntryExtension {
@@ -251,8 +250,8 @@ mod tests {
         (log, reference)
     }
 
-    /// Las dos vias —cache y recursion literal— dan lo mismo para todo
-    /// subarbol valido de todo arbol hasta 130 hojas, y las mismas pruebas.
+    /// Both routes —cache and literal recursion— give the same result for
+    /// every valid subtree of every tree up to 130 leaves, and the same proofs.
     #[test]
     fn cached_log_matches_the_reference_for_every_subtree() {
         for n in 0..=130u64 {
@@ -294,7 +293,7 @@ mod tests {
         }
         assert_eq!(incremental.root(), rebuilt.root());
         assert_eq!(incremental.cached_nodes(), rebuilt.cached_nodes());
-        // 37 hojas: 18 + 9 + 4 + 2 + 1 nodos completos.
+        // 37 leaves: 18 + 9 + 4 + 2 + 1 full nodes.
         assert_eq!(incremental.cached_nodes(), 18 + 9 + 4 + 2 + 1);
     }
 

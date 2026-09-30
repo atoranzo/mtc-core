@@ -1,9 +1,8 @@
-//! Los vectores acumulados del borrador (apendice «Test Vectors»): para
-//! todos los subarboles de todos los arboles hasta 130 hojas, un hash
-//! rodante de las salidas de cada algoritmo: 712 hashes de subarbol,
-//! 12.807 pruebas de inclusion, 42.893 pruebas de consistencia y 8.646
-//! coberturas, 65.058 casos en total. Si uno solo difiere, el hash final no
-//! cuadra.
+//! The draft's accumulated vectors (appendix "Test Vectors"): for every
+//! subtree of every tree up to 130 leaves, a running hash over the outputs
+//! of each algorithm: 712 subtree hashes, 12,807 inclusion proofs, 42,893
+//! consistency proofs and 8,646 coverings, 65,058 cases in total. If a
+//! single one differs, the final hash does not match.
 
 use mtc_core::der::hex;
 use mtc_core::hash::hash_leaf;
@@ -16,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 const N: u64 = 130;
 
-/// `d[i] = bytes([i])`, ya como hojas hasheadas.
+/// `d[i] = bytes([i])`, already as hashed leaves.
 fn tree() -> LeafHashes {
     LeafHashes((0..N).map(|i| hash_leaf(&[i as u8])).collect())
 }
@@ -62,7 +61,7 @@ fn subtree_inclusion_proofs() {
                 line.push('\n');
                 h.update(line);
 
-                // El ejercicio del verificador: evaluar, y rechazar recortes y anadidos.
+                // The verifier exercise: evaluate, and reject truncations and additions.
                 assert_eq!(
                     evaluate_inclusion_proof(&t.0[index as usize], st, index, &proof).unwrap(),
                     subtree_hash
@@ -111,7 +110,7 @@ fn subtree_consistency_proofs() {
                 line.push('\n');
                 h.update(line);
 
-                // El ejercicio del verificador.
+                // The verifier exercise.
                 let node = t.range_hash(start, end);
                 verify_consistency_proof(n, st, &proof, &node, &root).unwrap();
                 if !proof.is_empty() {
@@ -194,7 +193,7 @@ fn large_subtree_validity() {
     }
 }
 
-/// `(start, end, izquierdo, derecho)`.
+/// `(start, end, left, right)`.
 type CoveringCase = (u64, u64, (u64, u64), (u64, u64));
 
 #[test]
@@ -309,9 +308,9 @@ fn large_covering_subtrees() {
     }
 }
 
-/// Un `MTCProof` con un camino recortado o alargado **en un byte** no se
-/// decodifica: es la variante «by one byte» del ejercicio del verificador,
-/// que solo tiene sentido sobre la codificacion.
+/// An `MTCProof` whose path is shortened or lengthened **by one byte** does
+/// not decode: it is the "by one byte" variant of the verifier exercise,
+/// which only makes sense on the encoding.
 #[test]
 fn a_proof_off_by_one_byte_does_not_decode() {
     let t = tree();
@@ -324,7 +323,7 @@ fn a_proof_off_by_one_byte_does_not_decode() {
     };
     let bytes = proof.encode().unwrap();
     assert_eq!(MtcProof::decode(&bytes).unwrap(), proof);
-    // Recortar un byte del camino: la longitud declarada ya no cuadra.
+    // Trim one byte from the path: the declared length no longer matches.
     let mut short = bytes.clone();
     let path_len_pos = 2 + 6 + 6;
     let path_len = u16::from_be_bytes([short[path_len_pos], short[path_len_pos + 1]]);
@@ -335,7 +334,7 @@ fn a_proof_off_by_one_byte_does_not_decode() {
     long[path_len_pos..path_len_pos + 2].copy_from_slice(&(path_len + 1).to_be_bytes());
     long.insert(path_len_pos + 2 + path_len as usize, 0);
     assert!(MtcProof::decode(&long).is_err());
-    // Y una prueba de otro indice sube a otro hash.
+    // And a proof for another index climbs to a different hash.
     let other = inclusion_proof(&t, st, 11).unwrap();
     assert_eq!(
         mtc_core::subtree::verify_inclusion_proof(&t.0[10], st, 10, &other, &t.range_hash(8, 13)),

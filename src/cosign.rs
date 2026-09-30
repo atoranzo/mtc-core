@@ -1,34 +1,34 @@
-//! # Cofirmas: `CosignedMessage`, `Cosigner` y ML-DSA
+//! # Cosignatures: `CosignedMessage`, `Cosigner` and ML-DSA
 //!
-//! Lo que en Arqueo hacia `zk-ssl-node::firma_cabeza::FirmanteCabeza`
-//! —firmar la cabeza de epoca con un preambulo de dominio, **reservando el
-//! indice antes** y **verificando la propia salida antes de devolverla**—
-//! aqui lo hace un [`Cosigner`] sobre el `CosignedMessage` del borrador
-//! (seccion «Signature Format»), con la etiqueta `subtree/v1\n\0`. Es la
-//! misma estructura `cosigned_message` de la especificacion C2SP
-//! `tlog-cosignature` para ML-DSA-44, byte a byte: lo comprueba un test
-//! contra la implementacion de referencia en Go del borrador.
+//! What `zk-ssl-node::firma_cabeza::FirmanteCabeza` (the head signer) did in
+//! Arqueo —signing the epoch head with a domain preamble, **reserving the
+//! index first** and **verifying its own output before returning it**—
+//! is done here by a [`Cosigner`] over the draft's `CosignedMessage`
+//! (section "Signature Format"), with the label `subtree/v1\n\0`. It is the
+//! same `cosigned_message` structure as the C2SP `tlog-cosignature`
+//! specification for ML-DSA-44, byte for byte: a test checks it against
+//! the draft's reference implementation in Go.
 //!
-//! ## Por que la CA firma poco, y que permite eso
+//! ## Why the CA signs little, and what that enables
 //!
-//! La CA firma **un checkpoint y dos subarboles por ciclo**, no un
-//! certificado por solicitud. Es lo que hace viable una firma
-//! poscuantica grande (ML-DSA-44: 2.420 bytes) o incluso **una firma
-//! basada en hashes con estado** (XMSS/LMS), porque el indice se consume
-//! a ritmo de checkpoints y no de emisiones. Para esa segunda opcion el
-//! guardian de `hbs-state` es exactamente la pieza que falta, y por eso
-//! [`Cosigner::sign_message`] toma `&mut self`: un firmante con estado
-//! tiene que poder reservar su indice.
+//! The CA signs **one checkpoint and two subtrees per cycle**, not one
+//! certificate per request. That is what makes a large post-quantum
+//! signature (ML-DSA-44: 2,420 bytes) viable, or even **a stateful
+//! hash-based signature** (XMSS/LMS), because the index is consumed at
+//! the rate of checkpoints, not of issuances. For that second option the
+//! `hbs-state` guard is exactly the missing piece, and that is why
+//! [`Cosigner::sign_message`] takes `&mut self`: a stateful signer has
+//! to be able to reserve its index.
 //!
-//! ## ML-DSA: con sal («hedged») por defecto
+//! ## ML-DSA: hedged (salted) by default
 //!
-//! FIPS 204 define dos variantes de firma: la **hedged** (32 bytes
-//! aleatorios por firma) es la recomendada, y la determinista es opcional y
-//! el propio estandar advierte de su menor resistencia a ataques de fallo
-//! y de canal lateral. Ninguna de las dos cambia la verificacion, y
-//! `tlog-cosignature` no fija ninguna. [`mldsa::MlDsaCosigner::from_seed`]
-//! firma con sal tomada del sistema; [`mldsa::MlDsaCosigner::deterministic`]
-//! existe para reproducir vectores, y lo dice.
+//! FIPS 204 defines two signing variants: the **hedged** one (32 random
+//! bytes per signature) is the recommended one, and the deterministic one is
+//! optional; the standard itself warns of its lower resistance to fault
+//! and side-channel attacks. Neither changes verification, and
+//! `tlog-cosignature` fixes neither. [`mldsa::MlDsaCosigner::from_seed`]
+//! signs with salt taken from the system; [`mldsa::MlDsaCosigner::deterministic`]
+//! exists to reproduce vectors, and says so.
 
 use crate::hash::HashValue;
 use crate::subtree::Subtree;
@@ -37,14 +37,14 @@ use crate::tai::{TaiError, TrustAnchorId};
 /// `uint8 label[12] = "subtree/v1\n\0"`.
 pub const SUBTREE_LABEL: &[u8; 12] = b"subtree/v1\n\0";
 
-/// Lo que un cofirmante firma.
+/// What a cosigner signs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CosignedMessage {
     pub cosigner_id: TrustAnchorId,
-    /// Cero en las cofirmas que van dentro de un certificado. Distinto de
-    /// cero solo en un checkpoint con sello de tiempo (`start = 0`, `end`
-    /// = el mayor arbol consistente observado). **Si `start` no es cero,
-    /// tiene que ser cero**: lo exigen el borrador y `tlog-cosignature`.
+    /// Zero in the cosignatures that go inside a certificate. Non-zero
+    /// only in a timestamped checkpoint (`start = 0`, `end` = the largest
+    /// consistent tree observed). **If `start` is not zero, it has to be
+    /// zero**: the draft and `tlog-cosignature` both require it.
     pub timestamp: u64,
     pub log_id: TrustAnchorId,
     pub subtree: Subtree,
@@ -52,7 +52,7 @@ pub struct CosignedMessage {
 }
 
 impl CosignedMessage {
-    /// Las reglas que un mensaje tiene que cumplir antes de firmarse.
+    /// The rules a message has to satisfy before being signed.
     pub fn check(&self) -> Result<(), CosignError> {
         self.subtree.check()?;
         if self.timestamp != 0 && self.subtree.start != 0 {
@@ -61,7 +61,7 @@ impl CosignedMessage {
                 timestamp: self.timestamp,
             });
         }
-        // `tlog-cosignature`: el sello de tiempo no supera 2^63 - 1.
+        // `tlog-cosignature`: the timestamp does not exceed 2^63 - 1.
         if self.timestamp > i64::MAX as u64 {
             return Err(CosignError::TimestampOnSubtree {
                 start: self.subtree.start,
@@ -71,9 +71,9 @@ impl CosignedMessage {
         Ok(())
     }
 
-    /// La serializacion TLS del `CosignedMessage`: **una sola definicion**
-    /// para quien firma y para quien verifica. Falla cerrado si un nombre
-    /// no cabe en su prefijo de un byte o el mensaje viola una regla.
+    /// The TLS serialization of the `CosignedMessage`: **a single definition**
+    /// for whoever signs and whoever verifies. Fails closed if a name does
+    /// not fit in its one-byte prefix or the message violates a rule.
     pub fn to_bytes(&self) -> Result<Vec<u8>, CosignError> {
         self.check()?;
         let name = self.cosigner_id.oid_name()?;
@@ -99,8 +99,8 @@ pub struct SubtreeSignature {
     pub signature: Vec<u8>,
 }
 
-/// Un subarbol con su hash y las cofirmas recogidas, **en el orden
-/// canonico** (por `cosigner_id`), listo para entrar en un `MTCProof`.
+/// A subtree with its hash and the collected cosignatures, **in canonical
+/// order** (by `cosigner_id`), ready to go into an `MTCProof`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedSubtree {
     pub subtree: Subtree,
@@ -117,8 +117,8 @@ impl SignedSubtree {
         }
     }
 
-    /// Inserta manteniendo el orden; una segunda cofirma del mismo ID
-    /// sustituye a la primera.
+    /// Inserts while keeping the order; a second cosignature from the same
+    /// ID replaces the first.
     pub fn push(&mut self, sig: SubtreeSignature) {
         match self
             .signatures
@@ -132,32 +132,32 @@ impl SignedSubtree {
 
 #[derive(Debug)]
 pub enum CosignError {
-    /// El algoritmo no pudo firmar, o la firma recien hecha no verifica.
+    /// The algorithm could not sign, or the freshly made signature does not verify.
     Signing(String),
-    /// No hubo entropia para la sal de una firma con sal.
+    /// No entropy was available for the salt of a hedged signature.
     Randomness(String),
-    /// El guardian del indice se nego (fsync falso, contador corrupto…).
+    /// The index guard refused (fake fsync, corrupt counter...).
     Guard(hbs_state::GuardError),
-    /// Un identificador no cabe en el mensaje.
+    /// An identifier does not fit in the message.
     Tai(TaiError),
-    /// El subarbol no es valido.
+    /// The subtree is not valid.
     Subtree(crate::subtree::SubtreeError),
-    /// Un sello de tiempo sobre un subarbol que no empieza en cero.
+    /// A timestamp on a subtree that does not start at zero.
     TimestampOnSubtree { start: u64, timestamp: u64 },
 }
 
 impl core::fmt::Display for CosignError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            CosignError::Signing(s) => write!(f, "firma: {s}"),
-            CosignError::Randomness(s) => write!(f, "entropia: {s}"),
-            CosignError::Guard(g) => write!(f, "guardian: {g}"),
-            CosignError::Tai(e) => write!(f, "identificador: {e}"),
-            CosignError::Subtree(e) => write!(f, "subarbol: {e}"),
+            CosignError::Signing(s) => write!(f, "signature: {s}"),
+            CosignError::Randomness(s) => write!(f, "entropy: {s}"),
+            CosignError::Guard(g) => write!(f, "guard: {g}"),
+            CosignError::Tai(e) => write!(f, "identifier: {e}"),
+            CosignError::Subtree(e) => write!(f, "subtree: {e}"),
             CosignError::TimestampOnSubtree { start, timestamp } => {
                 write!(
                     f,
-                    "sello de tiempo {timestamp} sobre un subarbol que empieza en {start}"
+                    "timestamp {timestamp} on a subtree that starts at {start}"
                 )
             }
         }
@@ -184,15 +184,15 @@ impl From<crate::subtree::SubtreeError> for CosignError {
     }
 }
 
-/// Quien firma subarboles de un log.
+/// Whoever signs subtrees of a log.
 pub trait Cosigner {
     fn cosigner_id(&self) -> &TrustAnchorId;
 
-    /// Firma un `CosignedMessage` cuyo `cosigner_id` es el propio.
-    /// `&mut self` porque un firmante con estado consume indice.
+    /// Signs a `CosignedMessage` whose `cosigner_id` is its own.
+    /// `&mut self` because a stateful signer consumes index.
     fn sign_message(&mut self, message: &CosignedMessage) -> Result<Vec<u8>, CosignError>;
 
-    /// Compone el mensaje, lo comprueba y firma.
+    /// Composes the message, checks it and signs.
     fn sign_subtree(
         &mut self,
         log_id: &TrustAnchorId,
@@ -216,15 +216,15 @@ pub trait Cosigner {
     }
 }
 
-/// Quien verifica cofirmas de UN cofirmante (clave y algoritmo fijados
-/// por su ID, como pide la seccion «Signature Algorithms»).
+/// Whoever verifies cosignatures of ONE cosigner (key and algorithm fixed
+/// by its ID, as section "Signature Algorithms" requires).
 pub trait CosignatureVerifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> bool;
 }
 
 #[cfg(feature = "ml-dsa")]
 pub mod mldsa {
-    //! ML-DSA (FIPS 204) como cofirmante y como verificador.
+    //! ML-DSA (FIPS 204) as cosigner and as verifier.
 
     use super::{CosignError, CosignatureVerifier, CosignedMessage, Cosigner};
     use crate::hash::sha256;
@@ -237,22 +237,22 @@ pub mod mldsa {
 
     pub use ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
 
-    /// El byte de tipo de firma de `tlog-cosignature` para ML-DSA-44.
+    /// The `tlog-cosignature` signature type byte for ML-DSA-44.
     pub const TLOG_KEY_TYPE_MLDSA44: u8 = 0x06;
-    /// Bytes de una clave publica ML-DSA-44 (`pkEncode`).
+    /// Bytes of an ML-DSA-44 public key (`pkEncode`).
     pub const MLDSA44_PUBLIC_KEY_LEN: usize = 1312;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum SigningMode {
-        /// La variante recomendada por FIPS 204: 32 bytes de sal por firma.
+        /// The variant recommended by FIPS 204: 32 bytes of salt per signature.
         Hedged,
-        /// La variante opcional: reproducible, y por eso mas expuesta a
-        /// ataques de fallo. Para vectores de prueba.
+        /// The optional variant: reproducible, and therefore more exposed to
+        /// fault attacks. For test vectors.
         Deterministic,
     }
 
-    /// Un cofirmante ML-DSA. `P` es `MlDsa44` (el que `tlog-cosignature` y
-    /// el perfil `mtc-tlog` fijan), `MlDsa65` o `MlDsa87`.
+    /// An ML-DSA cosigner. `P` is `MlDsa44` (the one `tlog-cosignature` and
+    /// the `mtc-tlog` profile fix), `MlDsa65` or `MlDsa87`.
     pub struct MlDsaCosigner<P: MlDsaParams> {
         id: TrustAnchorId,
         key: SigningKey<P>,
@@ -260,16 +260,16 @@ pub mod mldsa {
     }
 
     impl<P: MlDsaParams> MlDsaCosigner<P> {
-        /// ⚠️ **La semilla es material de clave.** De donde sale (HSM, KMS,
-        /// fichero 0600 como `hbs_state::seed`) es decision de despliegue.
-        /// Se borra la copia local al terminar; **la del llamante es suya**.
-        /// Firma con sal ([`SigningMode::Hedged`]).
+        /// ⚠️ **The seed is key material.** Where it comes from (HSM, KMS,
+        /// a 0600 file as in `hbs_state::seed`) is a deployment decision.
+        /// The local copy is wiped when done; **the caller's copy is theirs**.
+        /// Signs with salt ([`SigningMode::Hedged`]).
         pub fn from_seed(id: TrustAnchorId, seed: [u8; 32]) -> Self {
             Self::with_mode(id, seed, SigningMode::Hedged)
         }
 
-        /// Firma determinista: la misma entrada, la misma firma. Solo para
-        /// reproducir vectores; ver el aviso del modulo.
+        /// Deterministic signing: same input, same signature. Only to
+        /// reproduce vectors; see the module's warning.
         pub fn deterministic(id: TrustAnchorId, seed: [u8; 32]) -> Self {
             Self::with_mode(id, seed, SigningMode::Deterministic)
         }
@@ -284,8 +284,8 @@ pub mod mldsa {
             self.mode
         }
 
-        /// La clave publica codificada (`pkEncode`), para el certificado de
-        /// la CA y para la configuracion de la parte que confia.
+        /// The encoded public key (`pkEncode`), for the CA's certificate
+        /// and for the relying party's configuration.
         pub fn verifying_key_bytes(&self) -> Vec<u8> {
             self.key.verifying_key().encode().to_vec()
         }
@@ -296,15 +296,15 @@ pub mod mldsa {
             }
         }
 
-        /// El *key ID* de `tlog-cosignature` para ML-DSA-44:
-        /// `SHA-256(nombre || "\n" || 0x06 || clave publica de 1312 bytes)[:4]`.
-        /// Es lo que va delante de la firma en la linea de un checkpoint
-        /// tlog. Solo esta definido para ML-DSA-44.
+        /// The `tlog-cosignature` *key ID* for ML-DSA-44:
+        /// `SHA-256(name || "\n" || 0x06 || 1312-byte public key)[:4]`.
+        /// It is what precedes the signature on a tlog checkpoint line.
+        /// Only defined for ML-DSA-44.
         pub fn tlog_key_id(&self) -> Result<[u8; 4], CosignError> {
             let pk = self.verifying_key_bytes();
             if pk.len() != MLDSA44_PUBLIC_KEY_LEN {
                 return Err(CosignError::Signing(format!(
-                    "tlog-cosignature solo define el key ID para ML-DSA-44 (clave de {MLDSA44_PUBLIC_KEY_LEN} bytes, no {})",
+                    "tlog-cosignature only defines the key ID for ML-DSA-44 ({MLDSA44_PUBLIC_KEY_LEN}-byte key, not {})",
                     pk.len()
                 )));
             }
@@ -316,8 +316,8 @@ pub mod mldsa {
             Ok([h[0], h[1], h[2], h[3]])
         }
 
-        /// La firma tal como va en una linea de nota tlog (antes de base64):
-        /// `key_id || timestamped_signature { u64 timestamp; firma }`.
+        /// The signature as it goes on a tlog note line (before base64):
+        /// `key_id || timestamped_signature { u64 timestamp; signature }`.
         pub fn tlog_note_signature(
             &self,
             timestamp: u64,
@@ -346,26 +346,26 @@ pub mod mldsa {
                     let mut rnd = [0u8; 32];
                     getrandom::fill(&mut rnd)
                         .map_err(|e| CosignError::Randomness(e.to_string()))?;
-                    // Algoritmo 2 de FIPS 204 en modo puro con contexto vacio:
-                    // M' = 0x00 || len(ctx) = 0x00 || ctx (vacio) || M.
+                    // Algorithm 2 of FIPS 204 in pure mode with empty context:
+                    // M' = 0x00 || len(ctx) = 0x00 || ctx (empty) || M.
                     let sig = expanded.sign_internal(&[&[0x00, 0x00], &bytes], &B32::from(rnd));
                     rnd.zeroize();
                     sig
                 }
             };
             let encoded = sig.encode().to_vec();
-            // ⚠️ Verificar la propia salida ANTES de devolverla, con el mismo
-            // verificador que usara un tercero (regla de §299 de Arqueo).
+            // ⚠️ Verify our own output BEFORE returning it, with the same
+            // verifier a third party will use (rule from §299 of Arqueo).
             if !self.verifier().verify(&bytes, &encoded) {
                 return Err(CosignError::Signing(
-                    "la firma recien producida no verifica".into(),
+                    "the freshly produced signature does not verify".into(),
                 ));
             }
             Ok(encoded)
         }
     }
 
-    /// El verificador de un cofirmante ML-DSA.
+    /// The verifier of an ML-DSA cosigner.
     pub struct MlDsaVerifier<P: MlDsaParams> {
         key: VerifyingKey<P>,
     }
@@ -422,8 +422,8 @@ pub mod mldsa {
             assert!(MlDsaVerifier::<MlDsa44>::from_bytes(&[0; 100]).is_none());
         }
 
-        /// Con sal, dos firmas del mismo mensaje difieren y las dos verifican;
-        /// sin sal, coinciden. La verificacion no distingue.
+        /// Hedged, two signatures of the same message differ and both verify;
+        /// deterministic, they coincide. Verification does not tell them apart.
         #[test]
         fn hedged_signatures_differ_and_verify_while_deterministic_ones_repeat() {
             let id = TrustAnchorId::from_ascii("32473.1").unwrap();
@@ -441,7 +441,7 @@ pub mod mldsa {
             assert_eq!(c, det.sign_message(&msg).unwrap());
             assert!(
                 v.verify(&msg.to_bytes().unwrap(), &c),
-                "misma clave, distinta variante, misma verificacion"
+                "same key, different variant, same verification"
             );
         }
 
@@ -458,7 +458,7 @@ pub mod mldsa {
                 .unwrap();
             assert_eq!(note.len(), 4 + 8 + 3);
             assert_eq!(&note[4..12], &1_700_000_000u64.to_be_bytes());
-            // ML-DSA-65 no tiene key ID definido.
+            // ML-DSA-65 has no defined key ID.
             let big = MlDsaCosigner::<MlDsa65>::from_seed(id, [1u8; 32]);
             assert!(big.tlog_key_id().is_err());
         }

@@ -1,16 +1,16 @@
-//! # `MTCProof` y el certificado que lo lleva
+//! # `MTCProof` and the certificate that carries it
 //!
-//! El equivalente del `ReciboInclusion` de `zk-ssl-verify` (§256): lo que
-//! un tercero necesita para comprobar una inclusion **sin el emisor**. Y
-//! la misma leccion: **una raiz suelta no prueba nada**. Lo que ata la
-//! prueba a algo que la CA no puede cambiar sin firmar es que el hash del
-//! subarbol lleve cofirmas —o que la parte que confia lo tenga ya como
-//! subarbol de confianza (landmark)—.
+//! The equivalent of the `ReciboInclusion` (inclusion receipt) of `zk-ssl-verify`
+//! (§256): what a third party needs to check an inclusion **without the issuer**.
+//! And the same lesson: **a loose root proves nothing**. What ties the
+//! proof to something the CA cannot change without signing is that the hash of
+//! the subtree carries cosignatures -- or that the relying party already holds it
+//! as a trusted subtree (landmark).
 //!
-//! El `MTCProof` viaja en el `signatureValue` de un certificado X.509
-//! cuyo `signatureAlgorithm` es `id-alg-mtcProof`: para todo lo demas
-//! (SAN, key usage, caducidad, CRL/OCSP) el certificado es un X.509
-//! corriente.
+//! The `MTCProof` travels in the `signatureValue` of an X.509 certificate
+//! whose `signatureAlgorithm` is `id-alg-mtcProof`: for everything else
+//! (SAN, key usage, expiry, CRL/OCSP) the certificate is an ordinary
+//! X.509.
 
 use crate::cosign::SubtreeSignature;
 use crate::der;
@@ -19,21 +19,21 @@ use crate::hash::{HashValue, HASH_SIZE};
 use crate::subtree::Subtree;
 use crate::tai::TrustAnchorId;
 
-/// `2^48 - 1`: el mayor `start`/`end` y el mayor indice.
+/// `2^48 - 1`: the largest `start`/`end` and the largest index.
 pub const MAX_U48: u64 = (1u64 << 48) - 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofError {
     Truncated,
     TrailingData,
-    /// `start`/`end` no caben en 48 bits, o `inclusion_proof` no es un
-    /// multiplo de `HASH_SIZE`.
+    /// `start`/`end` do not fit in 48 bits, or `inclusion_proof` is not a
+    /// multiple of `HASH_SIZE`.
     BadLength(&'static str),
-    /// Las cofirmas no van en orden canonico estricto (o hay un ID repetido).
+    /// The cosignatures are not in strict canonical order (or an ID is repeated).
     SignaturesNotSorted,
     Entry(EntryError),
     Der(der::DerError),
-    /// El `signatureAlgorithm` no es `id-alg-mtcProof` sin parametros.
+    /// The `signatureAlgorithm` is not `id-alg-mtcProof` without parameters.
     NotAnMtcCertificate,
 }
 
@@ -60,11 +60,11 @@ impl From<der::DerError> for ProofError {
 /// `MTCProof { extensions, uint48 start, uint48 end, inclusion_proof, signatures }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtcProof {
-    /// Las extensiones **de la entrada del log**, copiadas.
+    /// The extensions **of the log entry**, copied.
     pub extensions: Vec<LogEntryExtension>,
     pub subtree: Subtree,
     pub inclusion_proof: Vec<HashValue>,
-    /// Vacio en un certificado relativo a landmark.
+    /// Empty in a landmark-relative certificate.
     pub signatures: Vec<SubtreeSignature>,
 }
 
@@ -117,7 +117,7 @@ impl MtcProof {
         Ok(out)
     }
 
-    /// Lee un `MTCProof` que ocupa `input` entero.
+    /// Reads an `MTCProof` that occupies the whole of `input`.
     pub fn decode(input: &[u8]) -> Result<Self, ProofError> {
         let (extensions, rest) = decode_extensions(input)?;
         let (s, rest) = take(rest, 6)?;
@@ -155,7 +155,7 @@ impl MtcProof {
             let (sig, r) = take(r, u16::from_be_bytes([l[0], l[1]]) as usize)?;
             let cosigner_id =
                 TrustAnchorId::from_binary(id).map_err(|_| ProofError::BadLength("cosigner_id"))?;
-            // Estrictamente creciente: ni repetidos ni desordenados.
+            // Strictly increasing: neither duplicates nor out of order.
             if signatures
                 .last()
                 .is_some_and(|p| cosigner_id <= p.cosigner_id)
@@ -177,7 +177,7 @@ impl MtcProof {
     }
 }
 
-/// Un certificado MTC: su `TBSCertificate` en DER y su prueba.
+/// An MTC certificate: its `TBSCertificate` in DER and its proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtcCertificate {
     pub tbs_certificate: Vec<u8>,
@@ -208,7 +208,7 @@ impl MtcCertificate {
         })
     }
 
-    /// El numero de serie `(log_number << 48) | index`.
+    /// The serial number `(log_number << 48) | index`.
     pub fn serial(&self) -> Result<u64, ProofError> {
         let fields = der::parse_tbs(&self.tbs_certificate)?;
         Ok(der::decode_integer_u64(fields.serial.content)?)
@@ -222,7 +222,7 @@ impl MtcCertificate {
         Ok(self.serial()? & MAX_U48)
     }
 
-    /// Tamano en bytes del certificado en DER: lo que cuesta en el handshake.
+    /// Size in bytes of the DER certificate: what it costs in the handshake.
     pub fn der_len(&self) -> Result<usize, ProofError> {
         Ok(self.to_der()?.len())
     }

@@ -1,15 +1,15 @@
-//! Los vectores grandes del borrador (apendice «Large Subtree Test
-//! Vectors»): pruebas de inclusion y de consistencia sobre arboles de
-//! `2^48-1`, `2^63-1` y `2^64-1` hojas. Nadie construye esos arboles; lo
-//! que se prueba es que el VERIFICADOR los evalua sin desbordar.
+//! The draft's large vectors (appendix "Large Subtree Test Vectors"):
+//! inclusion and consistency proofs over trees of `2^48-1`, `2^63-1` and
+//! `2^64-1` leaves. Nobody builds those trees; what is tested is that the
+//! VERIFIER evaluates them without overflowing.
 //!
-//! El JSON es plano (objetos con valores de cadena) y se lee a mano.
+//! The JSON is flat (objects with string values) and is read by hand.
 
 use mtc_core::hash::HashValue;
 use mtc_core::subtree::{evaluate_inclusion_proof, verify_consistency_proof, Subtree};
 
-/// Un lector minimo: `[{"K": "v", ...}, ...]` con valores de cadena y sin
-/// escapes, que es todo lo que estos ficheros usan.
+/// A minimal reader: `[{"K": "v", ...}, ...]` with string values and no
+/// escapes, which is all these files use.
 fn read_records(json: &str) -> Vec<Vec<(String, String)>> {
     let mut records = Vec::new();
     let mut current: Option<Vec<(String, String)>> = None;
@@ -18,19 +18,19 @@ fn read_records(json: &str) -> Vec<Vec<(String, String)>> {
     while let Some(c) = chars.next() {
         match c {
             '{' => current = Some(Vec::new()),
-            '}' => records.push(current.take().expect("objeto abierto")),
+            '}' => records.push(current.take().expect("open object")),
             '"' => {
                 let mut s = String::new();
                 for c in chars.by_ref() {
                     if c == '"' {
                         break;
                     }
-                    assert_ne!(c, '\\', "el lector no admite escapes");
+                    assert_ne!(c, '\\', "the reader does not support escapes");
                     s.push(c);
                 }
                 match pending_key.take() {
                     None => pending_key = Some(s),
-                    Some(k) => current.as_mut().expect("dentro de un objeto").push((k, s)),
+                    Some(k) => current.as_mut().expect("inside an object").push((k, s)),
                 }
             }
             _ => {}
@@ -42,7 +42,7 @@ fn read_records(json: &str) -> Vec<Vec<(String, String)>> {
 fn field<'a>(rec: &'a [(String, String)], key: &str) -> &'a str {
     &rec.iter()
         .find(|(k, _)| k == key)
-        .unwrap_or_else(|| panic!("falta {key}"))
+        .unwrap_or_else(|| panic!("missing {key}"))
         .1
 }
 
@@ -79,13 +79,13 @@ fn hashes(s: &str) -> Vec<HashValue> {
 }
 
 fn u64_field(rec: &[(String, String)], key: &str) -> u64 {
-    field(rec, key).parse().expect("entero")
+    field(rec, key).parse().expect("integer")
 }
 
 #[test]
 fn large_inclusion_proofs() {
     let recs = read_records(include_str!("vectors/large_inclusion_proofs.json"));
-    assert!(recs.len() >= 20, "{} vectores", recs.len());
+    assert!(recs.len() >= 20, "{} vectors", recs.len());
     let mut sizes = std::collections::BTreeSet::new();
     for r in &recs {
         let st = Subtree {
@@ -95,10 +95,10 @@ fn large_inclusion_proofs() {
         let index = u64_field(r, "Index");
         let proof = hashes(field(r, "Proof"));
         let got = evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &proof)
-            .unwrap_or_else(|e| panic!("{index} en {st}: {e}"));
-        assert_eq!(got, hash(field(r, "SubtreeHash")), "{index} en {st}");
+            .unwrap_or_else(|e| panic!("{index} in {st}: {e}"));
+        assert_eq!(got, hash(field(r, "SubtreeHash")), "{index} in {st}");
         sizes.insert(st.end);
-        // Recortada o alargada en un hash entero, no vale.
+        // Shortened or lengthened by a whole hash, it is not valid.
         if !proof.is_empty() {
             assert!(evaluate_inclusion_proof(
                 &hash(field(r, "EntryHash")),
@@ -114,7 +114,7 @@ fn large_inclusion_proofs() {
             evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &longer).is_err()
         );
     }
-    // Los tres tamanos que el apendice anuncia estan representados.
+    // The three sizes the appendix announces are represented.
     assert!(sizes.iter().any(|e| *e > (1u64 << 47)), "2^48-1");
     assert!(sizes.iter().any(|e| *e > (1u64 << 62)), "2^63-1");
     assert!(sizes.iter().any(|e| *e > (1u64 << 63)), "2^64-1");
@@ -123,7 +123,7 @@ fn large_inclusion_proofs() {
 #[test]
 fn large_consistency_proofs() {
     let recs = read_records(include_str!("vectors/large_consistency_proofs.json"));
-    assert!(recs.len() >= 20, "{} vectores", recs.len());
+    assert!(recs.len() >= 20, "{} vectors", recs.len());
     for r in &recs {
         let st = Subtree {
             start: u64_field(r, "Start"),
@@ -134,7 +134,7 @@ fn large_consistency_proofs() {
         let node = hash(field(r, "SubtreeHash"));
         let root = hash(field(r, "TreeHash"));
         verify_consistency_proof(n, st, &proof, &node, &root)
-            .unwrap_or_else(|e| panic!("{st} en {n}: {e}"));
+            .unwrap_or_else(|e| panic!("{st} in {n}: {e}"));
         if !proof.is_empty() {
             assert!(
                 verify_consistency_proof(n, st, &proof[..proof.len() - 1], &node, &root).is_err()

@@ -2,43 +2,42 @@
 name = "mtc-core"
 version = "0.1.0"
 edition = "2021"
-# `u64::is_multiple_of` (1.87) es lo mas nuevo que se usa.
+# `u64::is_multiple_of` (1.87) is the newest thing in use.
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 authors = ["Angel Toranzo Portela"]
-description = "Backend de una CA de Merkle Tree Certificates (draft-ietf-plants-merkle-tree-certs): log de emision, subarboles, pruebas de inclusion y cofirmas PQC. Semilla del fork de Arqueo sin STARK."
+description = "A verified core for a Merkle Tree Certificates CA (draft-ietf-plants-merkle-tree-certs): issuance log, subtrees, inclusion proofs, PQC cosignatures and the relying-party verifier. Extracted from Arqueo, without its STARK layer."
 publish = false
 
-# ⚠️ WORKSPACE PROPIO. Este crate NO es miembro del workspace de Arqueo:
-# la tabla vacia de abajo lo convierte en raiz de su propio workspace, con
-# su propio `Cargo.lock`. Razones, las dos medidas:
-#   - `tools/canon.sh` enumera los miembros del `Cargo.toml` raiz y el
-#     canon cuenta 21 crates; anadir uno cambiaria cifras que las
-#     herramientas vigilan.
-#   - El `[patch.crates-io]` de la raiz sustituye `winter-*` por el fork
-#     (§533). Este crate no debe arrastrar winterfell, ni siquiera por
-#     resolucion accidental: aqui no hay campo de Goldilocks, hay SHA-256.
+# The empty table below makes this crate the root of its own workspace, with
+# its own `Cargo.lock`. It was born inside Arqueo's tree, where two things
+# made that necessary and both were measured: `tools/canon.sh` enumerates the
+# members of Arqueo's root manifest (the canon counts 21 crates), and
+# Arqueo's `[patch.crates-io]` replaces `winter-*` with a fork. This crate
+# must never drag in winterfell, not even by accidental resolution: there is
+# no Goldilocks field here, there is SHA-256. Standalone, the table is
+# harmless and stays as a record of that origin.
 [workspace]
 
 [dependencies]
-# El hash del log (RFC 9162 / MTC): SHA-256 nativo. Sustituye a Rescue
-# Prime (`zk-ssl-hash::native_merge`), que solo tenia sentido dentro de
-# un circuito STARK.
+# The log hash (RFC 9162 / MTC): native SHA-256. Replaces Rescue Prime
+# (`zk-ssl-hash::native_merge`), which only made sense inside a STARK
+# circuit.
 sha2 = "0.10"
 
-# El guardian de estado extraido de `zk-ssl-guardian`: contador monotono
-# persistido con fsync, autocomprobacion de tmpfs y reconciliacion. Aqui
-# guarda el numero de checkpoint (persistir ANTES de firmar) y, si el
-# cofirmante de la CA es XMSS/LMS, el indice de firma. Clavado a un commit.
+# The state guard extracted from `zk-ssl-guardian`: monotonic counter
+# persisted with fsync, tmpfs self-check and reconciliation. Here it holds
+# the checkpoint number (persist BEFORE signing) and, if the CA's cosigner
+# is XMSS/LMS, the signature index. Pinned to a commit.
 hbs-state = { git = "https://github.com/atoranzo/hbs-state", rev = "a960828bf0e810c30b49640c9bcb8d64f9c9557f" }
 
-# ML-DSA (FIPS 204). El borrador disena el formato de cofirma para ser
-# compatible con la construccion ML-DSA-44 de TLOG-COSIGNATURE. Opcional:
-# el nucleo del arbol no depende de ninguna firma concreta.
-# ⚠️ Sin auditoria independiente, declarado por el propio crate.
+# ML-DSA (FIPS 204). The draft designs the cosignature format to be
+# compatible with the ML-DSA-44 construction of TLOG-COSIGNATURE. Optional:
+# the tree core does not depend on any concrete signature.
+# ⚠️ No independent audit, as declared by the crate itself.
 ml-dsa = { version = "0.1.1", optional = true }
-# La sal de las firmas ML-DSA con sal (FIPS 204, variante recomendada) y el
-# borrado de la semilla: solo con la feature `ml-dsa`.
+# The salt of hedged ML-DSA signatures (FIPS 204, recommended variant) and
+# the erasure of the seed: only with the `ml-dsa` feature.
 getrandom = { version = "0.4", optional = true }
 zeroize = { version = "1", optional = true }
 
@@ -46,7 +45,8 @@ zeroize = { version = "1", optional = true }
 default = ["ml-dsa"]
 ml-dsa = ["dep:ml-dsa", "ml-dsa/zeroize", "dep:getrandom", "dep:zeroize"]
 
-# El ejemplo firma con ML-DSA: sin la feature no compila, y se declara.
+# The example signs with ML-DSA: without the feature it does not compile,
+# and that is declared.
 [[example]]
 name = "demo_ca"
 required-features = ["ml-dsa"]

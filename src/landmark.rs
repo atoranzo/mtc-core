@@ -1,14 +1,14 @@
-//! # Landmarks: los puntos de referencia predistribuidos
+//! # Landmarks: the predistributed reference points
 //!
-//! Un *landmark* es un tamano de arbol elegido de tarde en tarde (cada
-//! hora, dice el borrador) que la CA publica y las partes que confian
-//! reciben por su canal de actualizacion. Cada landmark `L` define **dos
-//! subarboles** —los que cubren `[tamano(L-1), tamano(L))`— y un
-//! certificado *relativo a landmark* es solo una prueba de inclusion a uno
-//! de ellos, **sin ninguna firma**: la parte que confia ya tiene el hash.
+//! A *landmark* is a tree size chosen every so often (every hour, the
+//! draft says) that the CA publishes and relying parties receive through
+//! their update channel. Each landmark `L` defines **two subtrees** —the
+//! ones covering `[size(L-1), size(L))`— and a *landmark-relative*
+//! certificate is just an inclusion proof to one of them, **with no
+//! signature at all**: the relying party already has the hash.
 //!
-//! Este modulo no tiene equivalente en Arqueo: alli la cabeza de cada
-//! epoca era la unidad de confianza y viajaba firmada siempre.
+//! This module has no equivalent in Arqueo: there the head of each epoch
+//! was the unit of trust and always travelled signed.
 
 use crate::subtree::{covering_subtrees, Subtree};
 
@@ -16,15 +16,15 @@ use crate::subtree::{covering_subtrees, Subtree};
 pub struct Landmark {
     pub number: u64,
     pub tree_size: u64,
-    /// Segundos POSIX; `>=` al `notAfter` de toda entrada bajo `tree_size`.
+    /// POSIX seconds; `>=` the `notAfter` of every entry under `tree_size`.
     pub expiry: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LandmarkError {
-    /// El tamano no crece estrictamente o la caducidad decrece.
+    /// The size does not grow strictly or the expiry decreases.
     NotMonotonic { tree_size: u64, expiry: u64 },
-    /// El indice no esta aun bajo ningun landmark: hay que esperar.
+    /// The index is not yet under any landmark: one has to wait.
     NotYetCovered(u64),
 }
 
@@ -36,8 +36,8 @@ impl core::fmt::Display for LandmarkError {
 
 impl std::error::Error for LandmarkError {}
 
-/// La secuencia de landmarks de un log. El landmark 0 es `(0, 0)` y nunca
-/// esta activo.
+/// The landmark sequence of a log. Landmark 0 is `(0, 0)` and is never
+/// active.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LandmarkSequence {
     landmarks: Vec<Landmark>,
@@ -61,7 +61,7 @@ impl LandmarkSequence {
     }
 
     pub fn latest(&self) -> &Landmark {
-        self.landmarks.last().expect("el landmark 0 siempre existe")
+        self.landmarks.last().expect("landmark 0 always exists")
     }
 
     pub fn get(&self, number: u64) -> Option<&Landmark> {
@@ -72,9 +72,9 @@ impl LandmarkSequence {
         &self.landmarks
     }
 
-    /// Anade un landmark. El procedimiento RECOMENDADO del borrador: como
-    /// mucho uno por intervalo de tiempo, con `expiry = ahora + vida
-    /// maxima del certificado`, y ninguno si el arbol no crecio.
+    /// Adds a landmark. The draft's RECOMMENDED procedure: at most one per
+    /// time interval, with `expiry = now + maximum certificate lifetime`,
+    /// and none if the tree did not grow.
     pub fn allocate(&mut self, tree_size: u64, expiry: u64) -> Result<&Landmark, LandmarkError> {
         let prev = self.latest();
         if tree_size <= prev.tree_size || expiry < prev.expiry {
@@ -89,7 +89,7 @@ impl LandmarkSequence {
         Ok(self.latest())
     }
 
-    /// Los dos subarboles del landmark `number`.
+    /// The two subtrees of landmark `number`.
     pub fn subtrees(&self, number: u64) -> Option<(Subtree, Subtree)> {
         let l = self.get(number)?;
         if number == 0 {
@@ -99,13 +99,13 @@ impl LandmarkSequence {
         Some(covering_subtrees(prev.tree_size, l.tree_size))
     }
 
-    /// Los landmarks activos (no caducados) en `now`, del mas nuevo al mas viejo.
+    /// The active (unexpired) landmarks at `now`, from newest to oldest.
     pub fn active(&self, now: u64) -> impl Iterator<Item = &Landmark> {
         self.landmarks.iter().rev().filter(move |l| l.expiry > now)
     }
 
-    /// **El landmark de un indice** para construir su certificado relativo:
-    /// el de menor numero cuyo tamano supera estrictamente al indice.
+    /// **The landmark of an index**, to build its landmark-relative
+    /// certificate: the lowest-numbered one whose size strictly exceeds the index.
     pub fn landmark_for_index(&self, index: u64) -> Result<&Landmark, LandmarkError> {
         self.landmarks
             .iter()
@@ -113,18 +113,18 @@ impl LandmarkSequence {
             .ok_or(LandmarkError::NotYetCovered(index))
     }
 
-    /// El subarbol del landmark de `index` que lo contiene.
+    /// The subtree of `index`'s landmark that contains it.
     pub fn subtree_for_index(&self, index: u64) -> Result<(&Landmark, Subtree), LandmarkError> {
         let l = self.landmark_for_index(index)?;
-        let (left, right) = self.subtrees(l.number).expect("landmark existente");
+        let (left, right) = self.subtrees(l.number).expect("existing landmark");
         let st = if right.contains(index) { right } else { left };
         debug_assert!(st.contains(index));
         Ok((l, st))
     }
 
-    /// El documento de publicacion (seccion «Publishing Landmarks»): el
-    /// numero del ultimo landmark, y una linea `tree_size expiry` por
-    /// landmark activo mas el primer caducado, que hace de terminador.
+    /// The publication document (section "Publishing Landmarks"): the
+    /// number of the latest landmark, and one `tree_size expiry` line per
+    /// active landmark plus the first expired one, which acts as terminator.
     pub fn publish(&self, now: u64) -> String {
         let mut out = format!("{}\n", self.latest().number);
         for l in self.landmarks.iter().rev() {

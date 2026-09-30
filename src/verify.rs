@@ -1,16 +1,16 @@
-//! # La parte que confia: verificar un certificado MTC
+//! # The relying party: verifying an MTC certificate
 //!
-//! El papel de `zk-ssl-verify` en Arqueo: **verificar sin compilar al
-//! emisor**. Este modulo no usa `ca`, ni `log`, ni ningun cofirmante
-//! concreto: recibe el DER del certificado, la configuracion de la parte
-//! que confia y la hora, y sigue el procedimiento de la seccion
-//! «Verifying Certificate Signatures» paso a paso, incluido el hash de la
-//! entrada **en un solo paso desde el `TBSCertificate`**.
+//! The role of `zk-ssl-verify` in Arqueo: **verify without compiling the
+//! issuer**. This module uses neither `ca`, nor `log`, nor any concrete
+//! cosigner: it receives the certificate's DER, the relying party's
+//! configuration and the time, and follows the procedure of the "Verifying
+//! Certificate Signatures" section step by step, including hashing the
+//! entry **in a single step from the `TBSCertificate`**.
 //!
-//! ⚠️ Sustituye solo la verificacion de la firma del certificado. El
-//! resto de la validacion de ruta X.509 (nombres, usos de clave, CRL/OCSP)
-//! sigue siendo del cliente TLS. La caducidad se comprueba aqui por
-//! comodidad, porque el `Validity` ya esta parseado.
+//! ⚠️ It replaces only the verification of the certificate signature. The
+//! rest of X.509 path validation (names, key usages, CRL/OCSP) remains the
+//! TLS client's job. Expiry is checked here for convenience, because the
+//! `Validity` is already parsed.
 
 use crate::cosign::{CosignatureVerifier, CosignedMessage};
 use crate::der::{self, DerError};
@@ -20,8 +20,8 @@ use crate::proof::{MtcCertificate, ProofError, MAX_U48};
 use crate::subtree::{evaluate_inclusion_proof, Subtree, SubtreeError};
 use crate::tai::TrustAnchorId;
 
-/// Un subarbol predistribuido (landmark) que la parte que confia ya
-/// considera consistente con sus cofirmantes.
+/// A predistributed subtree (landmark) that the relying party already
+/// considers consistent with its cosigners.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedSubtree {
     pub log_number: u16,
@@ -29,34 +29,35 @@ pub struct TrustedSubtree {
     pub hash: HashValue,
 }
 
-/// Un cofirmante reconocido: su ID y su verificador (clave + algoritmo).
+/// A recognized cosigner: its ID and its verifier (key + algorithm).
 pub type CosignerEntry = (TrustAnchorId, Box<dyn CosignatureVerifier>);
 
-/// La configuracion de la parte que confia para UNA CA (seccion «Relying
-/// Party Configuration»).
+/// The relying party's configuration for ONE CA ("Relying Party
+/// Configuration" section).
 pub struct RelyingPartyConfig {
     pub ca_id: TrustAnchorId,
-    /// Cada cofirmante reconocido con su verificador.
+    /// Each recognized cosigner with its verifier.
     pub cosigners: Vec<CosignerEntry>,
-    /// La politica, en su forma mas simple: **todos** estos tienen que
-    /// haber cofirmado, **ademas del cofirmante de la CA**, que se exige
-    /// siempre (es la firma del certificado; el borrador dice que la parte
-    /// que confia SHOULD exigirla, y sin ella no hay autenticidad). Aqui van
-    /// los testigos o espejos que dan transparencia. Puede ir vacio.
+    /// The policy, in its simplest form: **all** of these must have
+    /// cosigned, **in addition to the CA's cosigner**, which is always
+    /// required (it is the certificate's signature; the draft says the
+    /// relying party SHOULD require it, and without it there is no
+    /// authenticity). Here go the witnesses or mirrors that provide
+    /// transparency. May be empty.
     pub required_cosigners: Vec<TrustAnchorId>,
     pub trusted_subtrees: Vec<TrustedSubtree>,
-    /// Rangos **inclusivos** `[min, max]` de numeros de serie revocados,
-    /// como `minSerial`/`maxSerial` del certificado de la CA: asi `2^64-1`
-    /// tambien es revocable.
+    /// **Inclusive** ranges `[min, max]` of revoked serial numbers, like
+    /// `minSerial`/`maxSerial` in the CA's certificate: this way `2^64-1`
+    /// is revocable too.
     pub revoked_ranges: Vec<(u64, u64)>,
 }
 
-/// Por que se acepto.
+/// Why it was accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Basis {
-    /// El subarbol era de confianza (certificado relativo a landmark).
+    /// The subtree was trusted (landmark-relative certificate).
     TrustedSubtree,
-    /// Estas cofirmas se comprobaron.
+    /// These cosignatures were checked.
     Cosignatures(Vec<TrustAnchorId>),
 }
 
@@ -78,17 +79,17 @@ pub enum VerifyError {
     Der(DerError),
     Entry(EntryError),
     Subtree(SubtreeError),
-    /// El numero de serie no es un entero no negativo de 64 bits.
+    /// The serial number is not a non-negative 64-bit integer.
     BadSerial,
     Revoked(u64),
     LogNumberZero,
-    /// El `issuer` no es el `Name` de la CA configurada.
+    /// The `issuer` is not the `Name` of the configured CA.
     UnknownIssuer,
-    /// El subarbol es de confianza pero su hash no coincide.
+    /// The subtree is trusted but its hash does not match.
     TrustedSubtreeMismatch,
-    /// Un identificador derivado no cabe en el cable (CA ID demasiado largo).
+    /// A derived identifier does not fit on the wire (CA ID too long).
     Tai(crate::tai::TaiError),
-    /// El mensaje cofirmado no se pudo componer.
+    /// The cosigned message could not be composed.
     Cosign(String),
     MissingCosignature(TrustAnchorId),
     UnknownCosigner(TrustAnchorId),
@@ -110,18 +111,18 @@ macro_rules! from_error {
 }
 from_error!(ProofError => Proof, DerError => Der, EntryError => Entry, SubtreeError => Subtree, crate::tai::TaiError => Tai);
 
-/// **Verifica un certificado MTC** en DER contra la configuracion, en el
-/// instante `now`.
+/// **Verifies an MTC certificate** in DER against the configuration, at
+/// instant `now`.
 pub fn verify_certificate(
     cert_der: &[u8],
     cfg: &RelyingPartyConfig,
     now: u64,
 ) -> Result<VerifiedCertificate, VerifyError> {
-    // 1-2 · id-alg-mtcProof y el MTCProof, sin restos.
+    // 1-2 · id-alg-mtcProof and the MTCProof, with no trailing data.
     let cert = MtcCertificate::from_der(cert_der)?;
     let fields = der::parse_tbs(&cert.tbs_certificate)?;
 
-    // 3-4 · el numero de serie y los rangos revocados.
+    // 3-4 · the serial number and the revoked ranges.
     let serial =
         der::decode_integer_u64(fields.serial.content).map_err(|_| VerifyError::BadSerial)?;
     if cfg
@@ -132,7 +133,7 @@ pub fn verify_certificate(
         return Err(VerifyError::Revoked(serial));
     }
 
-    // 5-6 · indice, numero de log y el ID del log.
+    // 5-6 · index, log number and the log ID.
     let index = serial & MAX_U48;
     let log_number = serial >> 48;
     if log_number == 0 {
@@ -145,15 +146,15 @@ pub fn verify_certificate(
     }
     let log_id = cfg.ca_id.log_id(log_number)?;
 
-    // 7-9 · la entrada reconstruida y su hash.
+    // 7-9 · the reconstructed entry and its hash.
     let entry_hash = hash_leaf(&entry_bytes_from_tbs(&fields, &cert.proof.extensions)?);
 
-    // 10 · evaluar la prueba de inclusion.
+    // 10 · evaluate the inclusion proof.
     let subtree = cert.proof.subtree;
     let expected =
         evaluate_inclusion_proof(&entry_hash, subtree, index, &cert.proof.inclusion_proof)?;
 
-    // 11 · un subarbol de confianza decide por si solo…
+    // 11 · a trusted subtree decides on its own…
     let basis = match cfg
         .trusted_subtrees
         .iter()
@@ -165,9 +166,9 @@ pub fn verify_certificate(
             }
             Basis::TrustedSubtree
         }
-        // 12 · …y si no, las cofirmas exigidas —la de la CA siempre—, cada
-        //      una sobre el hash ESPERADO. Las de cofirmantes no reconocidos
-        //      se ignoran, como manda el borrador.
+        // 12 · …and otherwise, the required cosignatures —the CA's always—,
+        //      each over the EXPECTED hash. Those from unrecognized
+        //      cosigners are ignored, as the draft mandates.
         None => {
             let mut required: Vec<&TrustAnchorId> = vec![&cfg.ca_id];
             required.extend(cfg.required_cosigners.iter().filter(|id| **id != cfg.ca_id));
@@ -204,7 +205,7 @@ pub fn verify_certificate(
         }
     };
 
-    // El resto de la validacion X.509 sigue; aqui, la caducidad.
+    // The rest of X.509 validation follows; here, expiry.
     let validity = Validity::from_der(&fields.validity)?;
     if now < validity.not_before {
         return Err(VerifyError::NotYetValid);

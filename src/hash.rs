@@ -1,40 +1,40 @@
-//! # El hash del arbol: `MTH` de RFC 9162 sobre SHA-256
+//! # The tree hash: `MTH` from RFC 9162 over SHA-256
 //!
-//! Tres primitivas y ninguna mas, con los dos prefijos de dominio que
-//! RFC 6962/9162 fijan: `0x00` para una hoja, `0x01` para un nodo interno.
-//! Es la misma defensa de segunda preimagen que `zk-ssl-hash` aplicaba con
-//! `MMRHOJA1`/`MMRNODO1`: un nodo interno presentado como hoja compone
-//! distinto.
+//! Three primitives and no more, with the two domain prefixes that
+//! RFC 6962/9162 fix: `0x00` for a leaf, `0x01` for an internal node.
+//! It is the same second-preimage defence that `zk-ssl-hash` applied with
+//! `MMRHOJA1`/`MMRNODO1`: an internal node presented as a leaf composes
+//! differently.
 //!
-//! ⚠️ Aqui **no hay campo finito**. `zk-ssl-hash::native_merge` era Rescue
-//! Prime sobre Goldilocks porque tenia que ser barato **dentro de un
-//! circuito STARK**. En MTC nadie prueba nada en circuito: el hash es el
-//! que el borrador RECOMIENDA (SHA-256, `id-pe-mtcCertificationAuthority-
-//! SHA256`) y el que los cofirmantes tlog ya hablan.
+//! ⚠️ There is **no finite field** here. `zk-ssl-hash::native_merge` was
+//! Rescue Prime over Goldilocks because it had to be cheap **inside a
+//! STARK circuit**. In MTC nobody proves anything in a circuit: the hash is
+//! the one the draft RECOMMENDS (SHA-256, `id-pe-mtcCertificationAuthority-
+//! SHA256`) and the one the tlog cosigners already speak.
 
 use sha2::{Digest, Sha256};
 
-/// Bytes de salida del hash del log (`HASH_SIZE` en el borrador).
+/// Output bytes of the log hash (`HASH_SIZE` in the draft).
 pub const HASH_SIZE: usize = 32;
 
-/// Un valor de hash del arbol (`HashValue[HASH_SIZE]`).
+/// A tree hash value (`HashValue[HASH_SIZE]`).
 pub type HashValue = [u8; HASH_SIZE];
 
-/// SHA-256 de un mensaje cualquiera. Se expone porque el
-/// `subjectPublicKeyInfoHash` de la entrada usa **el mismo hash del log**.
+/// SHA-256 of an arbitrary message. Exposed because the entry's
+/// `subjectPublicKeyInfoHash` uses **the same hash as the log**.
 pub fn sha256(data: &[u8]) -> HashValue {
     let mut h = Sha256::new();
     h.update(data);
     h.finalize().into()
 }
 
-/// `MTH({}) = HASH("")`: la cima de un arbol vacio y el hash de un
-/// subarbol `[x, x)`.
+/// `MTH({}) = HASH("")`: the root of an empty tree and the hash of a
+/// subtree `[x, x)`.
 pub fn hash_empty() -> HashValue {
     sha256(&[])
 }
 
-/// `MTH({d}) = HASH(0x00 || d)`: la hoja.
+/// `MTH({d}) = HASH(0x00 || d)`: the leaf.
 pub fn hash_leaf(entry: &[u8]) -> HashValue {
     let mut h = Sha256::new();
     h.update([0x00]);
@@ -42,7 +42,7 @@ pub fn hash_leaf(entry: &[u8]) -> HashValue {
     h.finalize().into()
 }
 
-/// `HASH(0x01 || left || right)`: el nodo interno.
+/// `HASH(0x01 || left || right)`: the internal node.
 pub fn hash_node(left: &HashValue, right: &HashValue) -> HashValue {
     let mut h = Sha256::new();
     h.update([0x01]);
@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn empty_tree_is_sha256_of_nothing() {
-        // El vector clasico de SHA-256("").
+        // The classic SHA-256("") vector.
         let esperado = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         assert_eq!(crate::der::hex(&hash_empty()), esperado);
     }
@@ -66,7 +66,7 @@ mod tests {
     fn leaf_and_node_are_domain_separated() {
         let a = hash_leaf(&[1, 2]);
         let b = hash_node(&a, &a);
-        // Una hoja cuyo contenido son dos hashes no es un nodo.
+        // A leaf whose content is two hashes is not a node.
         let mut concat = Vec::new();
         concat.extend_from_slice(&a);
         concat.extend_from_slice(&a);
