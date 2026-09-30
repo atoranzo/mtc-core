@@ -40,7 +40,10 @@ fn read_records(json: &str) -> Vec<Vec<(String, String)>> {
 }
 
 fn field<'a>(rec: &'a [(String, String)], key: &str) -> &'a str {
-    &rec.iter().find(|(k, _)| k == key).unwrap_or_else(|| panic!("falta {key}")).1
+    &rec.iter()
+        .find(|(k, _)| k == key)
+        .unwrap_or_else(|| panic!("falta {key}"))
+        .1
 }
 
 fn base64(s: &str) -> Vec<u8> {
@@ -69,7 +72,10 @@ fn hash(s: &str) -> HashValue {
 }
 
 fn hashes(s: &str) -> Vec<HashValue> {
-    base64(s).chunks_exact(32).map(|c| c.try_into().unwrap()).collect()
+    base64(s)
+        .chunks_exact(32)
+        .map(|c| c.try_into().unwrap())
+        .collect()
 }
 
 fn u64_field(rec: &[(String, String)], key: &str) -> u64 {
@@ -82,7 +88,10 @@ fn large_inclusion_proofs() {
     assert!(recs.len() >= 20, "{} vectores", recs.len());
     let mut sizes = std::collections::BTreeSet::new();
     for r in &recs {
-        let st = Subtree { start: u64_field(r, "Start"), end: u64_field(r, "End") };
+        let st = Subtree {
+            start: u64_field(r, "Start"),
+            end: u64_field(r, "End"),
+        };
         let index = u64_field(r, "Index");
         let proof = hashes(field(r, "Proof"));
         let got = evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &proof)
@@ -91,11 +100,19 @@ fn large_inclusion_proofs() {
         sizes.insert(st.end);
         // Recortada o alargada en un hash entero, no vale.
         if !proof.is_empty() {
-            assert!(evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &proof[..proof.len() - 1]).is_err());
+            assert!(evaluate_inclusion_proof(
+                &hash(field(r, "EntryHash")),
+                st,
+                index,
+                &proof[..proof.len() - 1]
+            )
+            .is_err());
         }
         let mut longer = proof.clone();
         longer.push([0; 32]);
-        assert!(evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &longer).is_err());
+        assert!(
+            evaluate_inclusion_proof(&hash(field(r, "EntryHash")), st, index, &longer).is_err()
+        );
     }
     // Los tres tamanos que el apendice anuncia estan representados.
     assert!(sizes.iter().any(|e| *e > (1u64 << 47)), "2^48-1");
@@ -108,14 +125,20 @@ fn large_consistency_proofs() {
     let recs = read_records(include_str!("vectors/large_consistency_proofs.json"));
     assert!(recs.len() >= 20, "{} vectores", recs.len());
     for r in &recs {
-        let st = Subtree { start: u64_field(r, "Start"), end: u64_field(r, "End") };
+        let st = Subtree {
+            start: u64_field(r, "Start"),
+            end: u64_field(r, "End"),
+        };
         let n = u64_field(r, "TreeSize");
         let proof = hashes(field(r, "Proof"));
         let node = hash(field(r, "SubtreeHash"));
         let root = hash(field(r, "TreeHash"));
-        verify_consistency_proof(n, st, &proof, &node, &root).unwrap_or_else(|e| panic!("{st} en {n}: {e}"));
+        verify_consistency_proof(n, st, &proof, &node, &root)
+            .unwrap_or_else(|e| panic!("{st} en {n}: {e}"));
         if !proof.is_empty() {
-            assert!(verify_consistency_proof(n, st, &proof[..proof.len() - 1], &node, &root).is_err());
+            assert!(
+                verify_consistency_proof(n, st, &proof[..proof.len() - 1], &node, &root).is_err()
+            );
         }
         let mut longer = proof.clone();
         longer.push([0; 32]);
