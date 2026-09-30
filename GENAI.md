@@ -13,7 +13,8 @@ crate departed from it, because they did.
 
 - **Model:** Anthropic's Claude, through Claude Code (cloud sessions started
   from `claude.ai/code`). The specific version may change over the course of
-  the project; the commit trailers name the one that made each commit.
+  the project; the commit trailers name the one that took part in each
+  commit.
 - **Since when:** since this crate's first session, on 2026-09-30. It was
   born inside the Arqueo repository, whose own statement covers that
   repository since 2026-07-29, and was extracted with its history.
@@ -37,7 +38,12 @@ The method is Arqueo's, and it explains everything else:
 Two things follow from that method, and the record sustains them:
 
 - **Nothing gets in without passing the gates.** What is proposed and the
-  gates reject never reaches `main`.
+  gates reject never reaches `main`. Arqueo also counts in its entries the
+  blocks that died at their own gate; this record does the same from its
+  first entry after the push, and for the commits before it records instead
+  the one gate that was silenced and the commit that repaired it
+  (`AUDIT.md`, §2 and §3: a commit entered with a rustfmt diff that the
+  pipeline masked, and the next one fixed it).
 - **No claim in this repository rests on the model's knowledge.** What is
   claimed about the present is verified against the tree or against the
   specification's published vectors; what has not been measured is declared
@@ -47,11 +53,16 @@ Two things follow from that method, and the record sustains them:
 **Where the first commits departed from step 4, stated rather than glossed
 over.** The commits that created this crate were proposed *and executed* by
 the assistant, in a cloud session, on a review branch of the Arqueo
-repository: the gates ran in that session, their results are in each commit
-message and were re-derived commit by commit for [`AUDIT.md`](./AUDIT.md),
-and the author's acceptance is the review of that branch and its push to
-this repository as its `main`. Nothing reaches this repository that the
-author does not push. From that push on, step 4 applies as written.
+repository. The gates ran in that session, but the commit messages say
+little or nothing about their results: they were re-derived commit by
+commit, on 2026-09-30, for [`AUDIT.md`](./AUDIT.md), which is the only
+per-commit record of them. The author's acceptance is the review of that
+branch and the push of its `mtc/` history, split out with its commits, to
+this repository as its `main`. Nothing reaches this repository's `main`
+that the author has not reviewed and pushed or merged himself. From that
+push on, step 4 is the rule, and any change that departs from it again (a
+session that runs the gates and pushes a review branch) is declared in its
+own entry of `AUDIT.md`, not glossed over here.
 
 ## Where the record is
 
@@ -63,9 +74,9 @@ below).
 The per-change record is [`AUDIT.md`](./AUDIT.md): one entry per verified
 change, with its commit, its counters (tests, lint, format, re-run at that
 commit), what the change does **not** close and the lessons it left. It also
-records the two independent reviews that shaped the crate, the adversarial
-review against the draft and the verification of the chronology, with what
-each confirmed and refuted. It is substantially more detailed than a commit
+records the three independent agent reviews that shaped the crate, the
+verification of the chronology, the adversarial review against the draft and
+the verification of the translation, with what each confirmed and refuted. It is substantially more detailed than a commit
 message, and it is the place to look.
 
 ## Scope
@@ -78,8 +89,8 @@ without measurement, execution and the author's acceptance.
 ## Authorship and accountability
 
 The author of mtc-core is **Ángel José Toranzo Portela**, and he is the only
-one. An assistant is not listed as an author or a co-author: in the European
-Union, what a machine generates without substantial human intellectual
+one. An assistant is not an author or a co-author of this work, whatever the
+name of the trailer the tooling adds says: in the European Union, what a machine generates without substantial human intellectual
 contribution does not give rise to copyright, and here the decision, the
 measurement and the acceptance are the author's. The `Co-Authored-By` trailer
 that the tooling adds to commits records participation, not authorship, and

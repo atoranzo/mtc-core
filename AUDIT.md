@@ -5,9 +5,12 @@ Arqueo's manner: one entry per verified change, with its commit, its counters,
 what the change does **not** close and the lessons it left. Entries §1 to §10
 were written on 2026-09-30 from the commits of the extraction branch, and their
 counters were **re-derived on that date by checking out each commit and running
-the gates again** in the assistant's cloud session (the same environment in
-which they first ran; not the author's machine). A change that does not carry
-its own entry has not been verified.
+the four cargo gates again** (`cargo fmt --check`, `cargo clippy
+--all-targets`, `cargo test --release` with and without `ml-dsa`) in the
+assistant's cloud session (the same environment in which they first ran; not
+the author's machine). Arqueo's document gates were not re-run; the entries
+that cite them (§6, §7) report the run of the original session. A change that
+does not carry its own entry has not been verified.
 
 Commit hashes are those of this repository's history (the `git subtree split`
 of Arqueo's `mtc/` directory).
@@ -17,8 +20,8 @@ of Arqueo's `mtc/` directory).
 | review | agents | outcome |
 |---|---|---|
 | verification of the chronology (§4) | 6 finders, 6 sceptics, 1 synthesis | every claim of the starting note confirmed, corrected or marked unverified, with sources |
-| adversarial review of the crate (§5) | 6 reviewers by dimension, 24 sceptics | 51 raw findings: 15 confirmed, 9 refuted, 17 minor and unverified; the 15 confirmed and 16 of the 17 minor fixed, one minor left as is |
-| translation to English (§10) | 7 translators, 7 verifiers | 7 clean verdicts: code byte-identical, no Spanish left, meaning preserved |
+| adversarial review of the crate (§5) | 6 reviewers by dimension, 24 sceptics (one per finding that reached verification) | 51 raw findings, 41 after de-duplication; 24 reached a sceptic: 15 confirmed, 9 refuted; 17 of lower severity did not. The 15 confirmed and 15 of the 17 unverified fixed in §5, one more in §12, one left as is |
+| translation to English (§10) | 7 translators, 7 verifiers | 7 clean verdicts: Rust code byte-identical outside comments and strings, three placeholder names renamed inside README code fences (disclosed), no Spanish left, meaning preserved |
 
 The agents' full transcripts are not part of this repository; what survives is
 what each entry records and what the tests prove.
@@ -101,8 +104,9 @@ verifier's 64-bit arithmetic near its limits; they cost nothing to keep.
 
 **What changed.** Format only.
 
-**What was verified.** The previous commit had been made after a `cargo fmt --check` whose non-zero
-exit was masked by a `tail` in the same pipeline.
+**What was verified.** The previous commit had entered without passing rustfmt: its message says so,
+and in the session the non-zero exit of `cargo fmt --check` had been masked by
+a `tail` in the same pipeline, which the history does not show.
 
 **Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`: 37/0 (passed/failed) · without `ml-dsa`: 33/0.
 
@@ -124,9 +128,10 @@ starting note and what could not be verified.
 
 **What was verified.** The dates of the draft's versions were read directly from the git tags of
 its repository (`-00` 2023-03-10, `-04` 2025-03-03, `-05` 2025-06-20,
-`plants-00` 2026-02-18, `plants-06` 2026-09-21). The other dates rest on search
-snippets of the primary pages, because the NIST, Google, Cloudflare and IETF
-hosts are not reachable from the session; the table says so row by row.
+`plants-00` 2026-02-18, `plants-06` 2026-09-21). Several other dates rest on search snippets or mirrors of the primary pages,
+because the NIST, Google and IETF hosts are not reachable from the session; the
+Chromium commits were read from github.com directly; the table says which is
+which, row by row.
 
 **Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`: 37/0 (passed/failed) · without `ml-dsa`: 33/0.
 
@@ -143,12 +148,16 @@ hidden.
 **Commit** `3d769f3` · 2026-09-30
 
 **What changed.** Six reviewers (tree, encoding, verifier, security, CA flow, documentation)
-and one sceptic per finding, against the draft, its reference Go
-implementation and the C2SP tlog specifications. 51 raw findings, 15 confirmed,
-9 refuted, 17 minor ones the verification did not reach. The 15 confirmed and 16
-of the 17 minor ones were fixed and covered by tests; the one left as is holds
-that a landmark whose expiry equals the current second counts as expired, a
-definitional edge the draft does not settle.
+and one sceptic for each of the 24 findings of highest severity, against the
+draft, its reference Go implementation and the C2SP tlog specifications. 51
+raw findings, 41 after de-duplication; 24 reached a sceptic: 15 confirmed, 9
+refuted; the 17 of lowest severity did not. The 15 confirmed and 15 of the 17
+unverified ones were fixed in this commit and covered by tests; one more, the
+test of the decoder's own rejection of unsorted or duplicate cosigner IDs, was
+believed fixed here and was not (the patch had silently failed to apply) and
+lands in §12; the one left as is holds that a landmark whose expiry equals the
+current second counts as expired, an edge that turns on whether the draft's
+"before the current time" is read strictly.
 
 **What was verified.** `der::read_tlv` no longer panics on lengths that overflow (`30 88 ff…`);
 impossible dates and pre-1970 dates are rejected; `TrustAnchorId` stores the
@@ -252,10 +261,14 @@ others.
 
 **Commit** `270495d` · 2026-09-30
 
-**What changed.** Seven translators (one per file group) and seven independent verifiers,
-each of which stripped comments and string contents from the committed and the
-working copies and found the code byte-identical, grepped for leftover Spanish
-and compared the changed comments against the originals. The README opens as
+**What changed.** Seven translators (one per file group) and seven independent verifiers. For
+the six code groups the verifier stripped comments and string contents from the
+committed and the working copies and found the code byte-identical; the
+README's verifier read its whole diff and noted three placeholder identifiers
+renamed inside its code fence and diagrams (`ruta` to `path`, `izq, der` to
+`left, right`, the journal placeholder), none of them a compiled identifier.
+All grepped for leftover Spanish and compared the changed comments against the
+originals. The README opens as
 the README of its own repository, with a section on the name (`mtc-core`,
 descriptive, endorsed by no one, free on crates.io on 2026-09-30) and on where
 each piece comes from.
@@ -265,38 +278,74 @@ each piece comes from.
 
 **Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`: 50/0 (passed/failed) · without `ml-dsa`: 42/0.
 
-**What it does not close.** The ten commit messages before this one remain in Spanish: they are history
-and were not rewritten.
+**What it does not close.** Seven of the nine commit messages before this one remain in Spanish (the two
+written after the translation was decided, §8 and §9, are in English): they are
+history and were not rewritten.
 
 **Lesson.** Translation is a change like any other: it needs a verifier that is not the
 translator, and a mechanical check that the code did not move.
 
 ## §11 · GENAI.md in Arqueo's method, and this record
 
-**Commit** the one that adds this file · 2026-09-30
+**Commit** `28df509` · 2026-09-30
 
 **What changed.** `GENAI.md` follows the structure and the commitments of
 Arqueo's statement: what is used, the four steps of the method, the two
 consequences, where the record is, scope, authorship and accountability. It
-states the one place where the first ten commits departed from step 4 (the
-assistant ran the gates and pushed to a review branch; the author's acceptance
-was the review of that branch and its push to this repository) instead of
-glossing over it. This `AUDIT.md` is the record the statement points to.
+states the one place where the commits before the author's push, this one
+included, departed from step 4 (the assistant ran the gates and pushed to a
+review branch; the author's acceptance is the review of that branch and the
+push of its split history to this repository) instead of glossing over it.
+This `AUDIT.md` is the record the statement points to.
 
 **What was verified.** The counters of the table above: each of the ten commits
 checked out in its own worktree, `cargo fmt --check`, `cargo clippy
 --all-targets`, `cargo test --release` with and without `ml-dsa`, on
-2026-09-30. The assistant then checked this document and `GENAI.md` against
-the git history, the measurement log, the outputs of the three reviews and
-Arqueo's statement, and corrected one overclaim (§5 said every minor finding
-was fixed; one was left as is). A reading by two separate agent instances was
-attempted and did not run: the session's usage limit had been reached. The
-independent reading of these two documents is therefore the author's own, on
-the branch, before he pushes it.
+2026-09-30.
+
+**Counters.** Not re-run: no file outside `GENAI.md` and `AUDIT.md` changes, so
+the tree under test is that of §10 (50/0, 42/0 without `ml-dsa`, clippy 0, fmt
+clean).
 
 **What it does not close.** The counters were re-run in the assistant's
 environment, not on the author's machine; the first run on the author's machine
-is his to record.
+is his to record. And this entry, as first written, carried overclaims that §12
+records and corrects.
 
 **Lesson.** A method that requires a per-change record is not adopted by
 citing it; the record has to exist, with the numbers re-derived.
+
+## §12 · What two independent readers found in §11 and in GENAI.md, corrected
+
+**Commit** the one that adds this entry · 2026-09-30
+
+**What changed.** A first reading of `GENAI.md` and `AUDIT.md` by two
+separate agent instances did not run (the session's usage limit had been
+reached); a second attempt ran on the same day, one instance on the facts
+against the history and the numbers, one on the method and the wording, and
+found what this commit corrects: `GENAI.md` said the gate results were in each
+commit message (two of ten mention them, none with numbers); it counted two
+independent reviews where the record has three; it said nothing of the one
+commit that entered with a silenced formatting gate; it spoke of "this
+repository" where only `main` is under the author's push; §10 said ten Spanish
+commit messages where there are seven of nine; §5 said one minor finding was
+left as is where two were, and the review table added 15, 9 and 17 to 51
+without the ten duplicates that de-duplication removed and the cap of 24
+sceptics. The second minor finding, the missing test of the decoder's own
+rejection of unsorted or duplicate cosigner IDs, is fixed here: `src/proof.rs`
+gains `decoder_enforces_canonical_order_and_tolerates_unknown_ids`, which also
+checks that a GREASE identifier of any shape decodes.
+
+**What was verified.** The two readers' 27 findings, each with its evidence
+(a git command, a file and line, a number in the measurement log), applied or
+answered; then the gates on this tree.
+
+**Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`: 51/0 (passed/failed) · without `ml-dsa`: 43/0.
+
+**What it does not close.** The author's own reading of the branch, before he
+pushes it, is still the acceptance; nothing here replaces it.
+
+**Lesson.** The document that claims a method is the first thing the method
+has to be applied to. The first version of this record overclaimed in six
+places, and one "fixed" finding was not fixed: a patch that finds no anchor
+fails silently, and only a test, or a reader, notices.

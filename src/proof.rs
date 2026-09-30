@@ -283,4 +283,46 @@ mod tests {
         };
         assert_eq!(big.encode(), Err(ProofError::BadLength("end")));
     }
+
+    /// The decoder, not only the encoder, rejects unsorted or duplicate
+    /// cosignatures; and it accepts unknown IDs of any shape (GREASE), which
+    /// is what the draft requires.
+    #[test]
+    fn decoder_enforces_canonical_order_and_tolerates_unknown_ids() {
+        fn proof_with_ids(ids: &[&[u8]]) -> Vec<u8> {
+            let mut sigs = Vec::new();
+            for id in ids {
+                sigs.push(id.len() as u8);
+                sigs.extend_from_slice(id);
+                sigs.extend_from_slice(&[0, 1, 0xaa]);
+            }
+            // No extensions, subtree [0, 1), empty path.
+            let mut out = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0];
+            out.extend_from_slice(&(sigs.len() as u32).to_be_bytes()[1..]);
+            out.extend(sigs);
+            out
+        }
+        assert!(MtcProof::decode(&proof_with_ids(&[&[1], &[2], &[0x81, 0x00]])).is_ok());
+        assert_eq!(
+            MtcProof::decode(&proof_with_ids(&[&[2], &[1]])),
+            Err(ProofError::SignaturesNotSorted)
+        );
+        assert_eq!(
+            MtcProof::decode(&proof_with_ids(&[&[1], &[1]])),
+            Err(ProofError::SignaturesNotSorted)
+        );
+        assert_eq!(
+            MtcProof::decode(&proof_with_ids(&[&[0x81, 0x00], &[1]])),
+            Err(ProofError::SignaturesNotSorted)
+        );
+        // An ID with a huge arc (twelve continuation bytes) is valid GREASE:
+        // it decodes, and the verifier will ignore it.
+        let huge: Vec<u8> = [0xff; 12].iter().chain([0x7f].iter()).copied().collect();
+        let p = MtcProof::decode(&proof_with_ids(&[&[1], &huge])).unwrap();
+        assert_eq!(p.signatures.len(), 2);
+        assert!(p.signatures[1].cosigner_id.arcs().is_err());
+        // A malformed one (truncated, or empty) does not.
+        assert!(MtcProof::decode(&proof_with_ids(&[&[0x81]])).is_err());
+        assert!(MtcProof::decode(&proof_with_ids(&[&[]])).is_err());
+    }
 }
