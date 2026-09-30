@@ -30,22 +30,22 @@ what each entry records and what the tests prove.
 
 | § | commit | date | fmt | clippy | tests (passed/failed) | without `ml-dsa` |
 |---|---|---|---|---|---|---|
-| 1 | `853f3a7` | 2026-09-30 | clean | 0 | 35/0 | 31/0 |
-| 2 | `d3d55d8` | 2026-09-30 | DIFF | 0 | 37/0 | 33/0 |
-| 3 | `c679eac` | 2026-09-30 | clean | 0 | 37/0 | 33/0 |
-| 4 | `022f2ee` | 2026-09-30 | clean | 0 | 37/0 | 33/0 |
-| 5 | `3d769f3` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
-| 6 | `55e0546` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
-| 7 | `d6a3ee8` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
-| 8 | `923619a` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
-| 9 | `cad4c00` | 2026-09-30 | clean | 0 | 50/0 | 42/0 |
-| 10 | `270495d` | 2026-09-30 | clean | 0 | 50/0 | 42/0 |
+| 1 | `17103f8` | 2026-09-30 | clean | 0 | 35/0 | 31/0 |
+| 2 | `ccdabff` | 2026-09-30 | DIFF | 0 | 37/0 | 33/0 |
+| 3 | `46de090` | 2026-09-30 | clean | 0 | 37/0 | 33/0 |
+| 4 | `4971648` | 2026-09-30 | clean | 0 | 37/0 | 33/0 |
+| 5 | `bd84dff` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
+| 6 | `a136dcf` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
+| 7 | `294c640` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
+| 8 | `4a81a71` | 2026-09-30 | clean | 0 | 48/0 | 40/0 |
+| 9 | `0aef4d9` | 2026-09-30 | clean | 0 | 50/0 | 42/0 |
+| 10 | `645ab5f` | 2026-09-30 | clean | 0 | 50/0 | 42/0 |
 
 ---
 
 ## §1 · The seed: a verified core for a Merkle Tree Certificates CA
 
-**Commit** `853f3a7` · 2026-09-30
+**Commit** `17103f8` · 2026-09-30
 
 **What changed.** Twelve modules in a standalone Cargo workspace: SHA-256 tree hashing (RFC 9162
 prefixes), subtrees with inclusion and consistency proofs and interval
@@ -79,7 +79,7 @@ one-definition-per-format rule, not `SparseTree`.
 
 ## §2 · The draft's large test vectors, with a hand-written reader
 
-**Commit** `d3d55d8` · 2026-09-30
+**Commit** `ccdabff` · 2026-09-30
 
 **What changed.** `tests/large_vectors.rs` evaluates the inclusion and consistency proofs that
 the draft's repository publishes for trees of 2^48-1, 2^63-1 and 2^64-1 leaves,
@@ -100,7 +100,7 @@ verifier's 64-bit arithmetic near its limits; they cost nothing to keep.
 
 ## §3 · rustfmt of the large-vector test
 
-**Commit** `c679eac` · 2026-09-30
+**Commit** `46de090` · 2026-09-30
 
 **What changed.** Format only.
 
@@ -117,7 +117,7 @@ gate now runs on its own and its exit code is the one that decides.
 
 ## §4 · The verified chronology of the post-quantum transition in the plan
 
-**Commit** `022f2ee` · 2026-09-30
+**Commit** `4971648` · 2026-09-30
 
 **What changed.** Six independent researchers, one per claim of the starting note, and six
 sceptics, one per finding, verified the dates of NIST's FIPS 203/204/205,
@@ -145,7 +145,7 @@ hidden.
 
 ## §5 · The corrections of the adversarial review against the draft and the C2SP specifications
 
-**Commit** `3d769f3` · 2026-09-30
+**Commit** `bd84dff` · 2026-09-30
 
 **What changed.** Six reviewers (tree, encoding, verifier, security, CA flow, documentation)
 and one sceptic for each of the 24 findings of highest severity, against the
@@ -184,7 +184,7 @@ code.
 
 ## §6 · One figure of the plan reworded so that Arqueo's figure gate does not read it as tests
 
-**Commit** `55e0546` · 2026-09-30
+**Commit** `a136dcf` · 2026-09-30
 
 **What changed.** Arqueo's figure gate read the Spanish figure for the inclusion paths of the
 accumulated vectors (a number followed by the Spanish word for tests) as a test
@@ -202,7 +202,7 @@ the fix is the wording, not the gate.
 
 ## §7 · The licence of the vectors copied from the IETF repository, declared
 
-**Commit** `d6a3ee8` · 2026-09-30
+**Commit** `294c640` · 2026-09-30
 
 **What changed.** The two JSON files under `tests/vectors/` are code components of an IETF
 contribution: Simplified BSD License of the IETF Trust, with its notice next to
@@ -218,7 +218,7 @@ the crate's MIT OR Apache-2.0.
 
 ## §8 · The files the extracted repository needs
 
-**Commit** `923619a` · 2026-09-30
+**Commit** `4a81a71` · 2026-09-30
 
 **What changed.** Copies of `LICENSE-MIT` and `LICENSE-APACHE`; a `NOTICE` naming the only
 third-party material and stating the absence of affiliation; a first
@@ -235,7 +235,7 @@ the method; §11 replaces it with Arqueo's method.
 
 ## §9 · The start-up check consults the journal in every state, and a test deletes the real counter
 
-**Commit** `cad4c00` · 2026-09-30
+**Commit** `0aef4d9` · 2026-09-30
 
 **What changed.** Arqueo's ECST report found, by reading, that the node's start-up policy
 consulted the journal only in one branch of the reconciliation, so a deleted
@@ -259,7 +259,7 @@ others.
 
 ## §10 · Everything in English, with the name-and-provenance section and a standalone README
 
-**Commit** `270495d` · 2026-09-30
+**Commit** `645ab5f` · 2026-09-30
 
 **What changed.** Seven translators (one per file group) and seven independent verifiers. For
 the six code groups the verifier stripped comments and string contents from the
@@ -287,7 +287,7 @@ translator, and a mechanical check that the code did not move.
 
 ## §11 · GENAI.md in Arqueo's method, and this record
 
-**Commit** `28df509` · 2026-09-30
+**Commit** `48f24bc` · 2026-09-30
 
 **What changed.** `GENAI.md` follows the structure and the commitments of
 Arqueo's statement: what is used, the four steps of the method, the two
@@ -479,7 +479,7 @@ interoperability run found no format bug in the crate and two in what the
 crate said about itself; that is what the run is for.
 
 **Correction, same day, second commit of the branch.** The first push of
-this entry's commit (`0129626`) did not carry the corpus's 27 `.pem` files:
+this entry's commit (`8e936d7`) did not carry the corpus's 27 `.pem` files:
 the repository's `.gitignore` excludes `*.pem` (keys), the assistant's
 `git add -A` obeyed it, and the gates reported 66/0 on a tree where the
 files existed untracked. The author's first run of the gates on the branch
@@ -500,9 +500,9 @@ files git does not see has not passed on the commit.
 **What changed.** Nothing in the code: this entry records the author's own
 execution of `interop/run.sh` and of the gates on the `interop` branch,
 which §14 left as his to record, and the merge of that branch into `main`
-(fast-forward, `20c9a45..42e405b`).
+(fast-forward, `a4595c7..aa48595`).
 
-**The run.** `interop/run.sh` at commit `0129626`, on 2026-09-30 at
+**The run.** `interop/run.sh` at commit `8e936d7`, on 2026-09-30 at
 12:19:10 UTC, with Go 1.27.1 installed from go.dev, the reference tool at
 commit `99097c9e0af9641a85311b68f7642978b882d385` (2026-09-29) built with
 `go build` (its `golang.org/x/crypto` v0.54.0 from the module proxy), rustc
@@ -519,10 +519,10 @@ equal to the one computed here, and the signature line verifying as a bare
 subtree signature with timestamp zero. `failures: 0`. The same numbers as
 §14's run in the container.
 
-**Counters, run on this machine, at `42e405b`.** `cargo fmt --check`:
+**Counters, run on this machine, at `aa48595`.** `cargo fmt --check`:
 clean · `cargo clippy --all-targets`: 0 warnings · `cargo test --release`:
 66/0 (passed/failed; `tests/interop_corpus.rs` 4/0) · without `ml-dsa`:
-53/0. The first run of the gates, at `0129626`, gave 62/4: the four tests
+53/0. The first run of the gates, at `8e936d7`, gave 62/4: the four tests
 of the corpus, for the reason §14 records. Machine: Linux
 6.18.33.2-microsoft-standard-WSL2 x86_64, WSL2.
 
@@ -534,3 +534,57 @@ next step outside this repository.
 **Lesson.** The second machine found what the first had not: a corpus git
 had never seen. A run on the author's machine is not a formality of the
 method; it is the only run that can find that.
+
+## §16 · The `Co-Authored-By` trailer removed from every commit: the history rewritten, the hashes changed
+
+**Commit** the one that adds this entry · 2026-09-30
+
+**What changed.** Nothing in the files. The author rewrote the 16 commits
+of `main` on his machine (`git filter-branch`, 2026-09-30) to drop the
+`Co-Authored-By: Claude …` line the tooling appends to every commit message
+the assistant makes. GitHub renders that trailer as co-authorship, in the
+repository's header and next to each commit; GENAI.md states that an
+assistant is not a co-author of this work, and the badge said otherwise. The
+`Claude-Session` trailer stays on those commits: it records the session,
+produces no badge, and is what GENAI.md now names as the per-commit
+provenance. The tree of every commit is unchanged (`git diff main
+main-no-coauthor --stat` printed nothing before the forced update); only
+the hashes changed, the author's own commit of §13 included, because its
+parent did. Forced update of `main`: `8e4badd` → `47983b2`.
+
+**The hashes, before and after.** Every hash this file cited up to §15 has
+been replaced by its new value with the table below; whoever holds the old
+history can map it back. The pairing was checked by tree and subject, not
+by position.
+
+| before | after | subject |
+|---|---|---|
+| `8e4badd` | `47983b2` | AUDIT §15: the interoperability run and the gates on the author's machine |
+| `42e405b` | `aa48595` | The corpus's certificates, which *.pem in .gitignore had kept out of the branch |
+| `0129626` | `8e936d7` | Interoperability with the draft's reference implementation, both directions |
+| `20c9a45` | `a4595c7` | AUDIT §13: the first run of the gates on the author's machine |
+| `a4f9f39` | `21836fb` | mtc: what two independent readers found in GENAI.md and AUDIT.md, corrected; the decoder test that was missing |
+| `28df509` | `48f24bc` | mtc: GENAI.md in Arqueo's method, and AUDIT.md, one entry per verified change |
+| `270495d` | `645ab5f` | mtc: everything in English, with the name-and-provenance section and a standalone README |
+| `cad4c00` | `0aef4d9` | mtc: the start-up check consults the journal in every state, and a test deletes the real counter |
+| `923619a` | `4a81a71` | mtc: the files the extracted repository needs (licences, NOTICE, GENAI, gitignore) |
+| `d6a3ee8` | `294c640` | mtc: la licencia de los vectores copiados del repositorio del IETF, declarada |
+| `55e0546` | `a136dcf` | mtc: una cifra del plan escrita de forma que el cerrojo de cifras no la tome por tests |
+| `3d769f3` | `bd84dff` | mtc: correcciones de la revision adversarial contra el borrador y las especificaciones C2SP |
+| `022f2ee` | `4971648` | mtc: la cronologia verificada de la transicion poscuantica en el plan |
+| `c679eac` | `46de090` | mtc: rustfmt del test de vectores grandes |
+| `d3d55d8` | `ccdabff` | mtc: los vectores grandes del borrador, con un lector escrito a mano |
+| `853f3a7` | `17103f8` | mtc: semilla de una CA de Merkle Tree Certificates sobre la infraestructura de Arqueo |
+
+**Counters.** Unchanged by construction: the 66/0 and 53/0 of §15 at
+`8e4badd` are those of `47983b2`, the same tree.
+
+**What it does not close.** The commits of the branch in Arqueo that
+carried the `mtc/` directory still bear the trailer; that repository's
+history is the author's to decide. Arqueo's `doc/MTC.md` cites the
+pre-rewrite hash and is corrected in that repository.
+
+**Lesson.** A tool's default is a claim. "Co-Authored-By" was never this
+project's word for what the assistant did, and a header on GitHub said it
+louder than GENAI.md's disclaimer. From this entry on, commits carry
+`Claude-Session` only.

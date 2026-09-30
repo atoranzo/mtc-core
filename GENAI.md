@@ -66,10 +66,12 @@ own entry of `AUDIT.md`, not glossed over here.
 
 ## Where the record is
 
-Per-commit marking is the tooling's, not the project's method: the trailers
-`Co-Authored-By` and `Claude-Session` on each commit record which assistant
-took part and in which session. They are provenance, not authorship (see
-below).
+Per-commit marking is the tooling's, not the project's method: the trailer
+`Claude-Session` on each commit records in which session an assistant took
+part. It is provenance, not authorship (see below). The tooling also added
+a `Co-Authored-By` trailer, which GitHub renders as co-authorship; the author
+removed it from the whole history on 2026-09-30, and AUDIT.md §16 has the
+table of the hashes before and after.
 
 The per-change record is [`AUDIT.md`](./AUDIT.md): one entry per verified
 change, with its commit, its counters (tests, lint, format, re-run at that
@@ -89,11 +91,11 @@ without measurement, execution and the author's acceptance.
 ## Authorship and accountability
 
 The author of mtc-core is **Ángel José Toranzo Portela**, and he is the only
-one. An assistant is not an author or a co-author of this work, whatever the
-name of the trailer the tooling adds says: in the European Union, what a machine generates without substantial human intellectual
+one. An assistant is not an author or a co-author of this work, whatever a tool's default
+trailer says: in the European Union, what a machine generates without substantial human intellectual
 contribution does not give rise to copyright, and here the decision, the
-measurement and the acceptance are the author's. The `Co-Authored-By` trailer
-that the tooling adds to commits records participation, not authorship, and
-the licence under which the code is offered is the author's to grant. Anyone
+measurement and the acceptance are the author's. The `Claude-Session` trailer
+on commits records participation, not authorship, and the licence under
+which the code is offered is the author's to grant. Anyone
 who wants to argue about a design or code decision has a person in front of
 them who explains it.
