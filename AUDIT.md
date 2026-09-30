@@ -349,3 +349,22 @@ pushes it, is still the acceptance; nothing here replaces it.
 has to be applied to. The first version of this record overclaimed in six
 places, and one "fixed" finding was not fixed: a patch that finds no anchor
 fails silently, and only a test, or a reader, notices.
+
+## §13 · The first run on the author's machine
+
+**Commit** the one that adds this entry · 2026-09-30
+
+**What changed.** Nothing in the code: this entry records the first execution
+of the gates on the author's own machine, which §11 and §12 left as his to
+record. From here on, step 4 of GENAI.md applies as written.
+
+**Counters, run on this machine.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets`: 0 warnings · `cargo test --release`: 51/0 (passed/failed) ·
+without `ml-dsa`: 43/0. Toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14). Machine: Linux 6.18.33.2-microsoft-standard-WSL2 x86_64,
+WSL2.
+
+**What it does not close.** Nothing new; the open items are those of the
+README, section 7.
+
+**Lesson.** A record that says "the author's machine" has to have the
+author's machine in it.
