@@ -5,3 +5,6 @@
 *.pem
 secrets
 .env
+
+# The reference implementation's corpus is data, not keys: its certificates are tracked.
+!tests/vectors/interop-plants-07/*.pem

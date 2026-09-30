@@ -477,3 +477,18 @@ pretending. Nothing here is an audit.
 working copy" was true and still named the wrong `-version`. The
 interoperability run found no format bug in the crate and two in what the
 crate said about itself; that is what the run is for.
+
+**Correction, same day, second commit of the branch.** The first push of
+this entry's commit (`0129626`) did not carry the corpus's 27 `.pem` files:
+the repository's `.gitignore` excludes `*.pem` (keys), the assistant's
+`git add -A` obeyed it, and the gates reported 66/0 on a tree where the
+files existed untracked. The author's first run of the gates on the branch
+found it: the four tests of `tests/interop_corpus.rs` failed with "ca_cert.pem:
+No such file or directory", while his `interop/run.sh` passed with
+`failures: 0` (Go 1.27.1 from go.dev, the demo at the same commit, rustc
+1.97.1). The fix is a negation for that directory in `.gitignore` and the
+files themselves; the hash tiles `tile/0` and `tile/1`, copied by accident
+and not what the README describes, are dropped (the test reads
+`tile/entries` only). The counters below are re-run on the tree as pushed,
+checked with `git ls-files`. The lesson is §12's again: a gate that passes on
+files git does not see has not passed on the commit.
