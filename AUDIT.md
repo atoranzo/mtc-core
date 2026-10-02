@@ -588,3 +588,45 @@ pre-rewrite hash and is corrected in that repository.
 project's word for what the assistant did, and a header on GitHub said it
 louder than GENAI.md's disclaimer. From this entry on, commits carry
 `Claude-Session` only.
+
+## §17 · Outside the repository: the report to the working group, its answers, and the implementations this crate did not know about
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What changed.** README section 7 said that `demo/` was "the only other
+implementation of the current design". It stopped being true on 2026-09-29,
+before this crate said it, and nobody here had looked: Bob Beck (OpenSSL)
+rewrote Cloudflare's Go CA and mirror for `-06` that day
+(`github.com/bob-beck/cloudflare-mtc`, commits `ba24e24` to `c6cdfe2`), and the
+TLS side is OpenSSL's pull request `#33014`; he announced both on the PLANTS
+list on 2026-10-01 with an end-to-end demonstration
+(`github.com/bob-beck/mtc-update-service`). The sentence is corrected; the
+two are named as not yet measured. Nothing in either repository refers to
+this crate: they are independent of it, as it is of them.
+
+**The record of what left this repository** between §16 and this entry, all
+by the author:
+
+- On the working group's list, `plants@ietf.org`, 2026-09-30 14:06 UTC,
+  subject "An independent Rust implementation of the -07 formats,
+  interop-tested against demo/": the report of §14 and §15, with the limits of
+  README section 7 and the provenance of GENAI.md. Archived at
+  `mailarchive.ietf.org/arch/browse/plants/`.
+- In `ietf-plants-wg/merkle-tree-certs`, issue #341: the reference tool's
+  checkpoint lines are not `tlog-cosignature` lines. David Benjamin, its
+  principal author: "nice catch", "I don't believe anyone before you has ever
+  tried consuming it", and "fixing this makes sense to me". The author offered
+  the pull request for after `draft-07`.
+- Issue #342: the six `trusted-subtree` lines of the sample `policy.txt` do not
+  match the shipped `mtc.json`. Confirmed ("that diverged a bit"), parked
+  until `draft-07` is cut; the author committed to the pull request then.
+
+**Counters.** None move: documentation only.
+
+**What it does not close.** The measurement against the two implementations
+named above (§19), and the two pull requests, which wait for `draft-07`.
+
+**Lesson.** "The only other implementation" was a claim about the world, not
+about this crate, and the world moved without asking. A limit of the form
+"nothing else exists" needs a date next to it, or a reader to check it.
+

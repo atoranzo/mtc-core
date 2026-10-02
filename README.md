@@ -547,9 +547,15 @@ per version, one ledger entry per change) and none of the STARK code.
   corrected and covered by tests, and that is no substitute for an audit.
 - **Interoperability is measured against one implementation, in one
   setting.** The `demo/` directory of the draft's repository (a generator and
-  a verifier in Go, commit `99097c9e`, `-version plants-07`) is the only
-  other implementation of the current design; Cloudflare's `bwesterb/mtc`
-  still follows the earlier batch design. Against `demo/`, in both directions
+  a verifier in Go, commit `99097c9e`, `-version plants-07`) is the one
+  measured. It is not the only other implementation of the current design:
+  since 2026-09-29 there are at least two more, OpenSSL's (pull request
+  `openssl/openssl#33014`, the TLS client and server side in C) and Bob Beck's
+  rewrite of Cloudflare's Go CA and mirror for `-06`
+  (`github.com/bob-beck/cloudflare-mtc`), announced on the working group's list
+  with an end-to-end demonstration; neither is measured here yet (AUDIT.md
+  §17). Cloudflare's own `bwesterb/mtc` still follows the earlier batch
+  design. Against `demo/`, in both directions
   and with negatives, everything measured agrees: its 26 verdicts are
   reproduced here (`tests/interop_corpus.rs`, offline), its log of 2122
   entries is rebuilt from its tiles to the same root, and the Go verifier
