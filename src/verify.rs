@@ -8,7 +8,9 @@
 //! entry **in a single step from the `TBSCertificate`**.
 //!
 //! ⚠️ It replaces only the verification of the certificate signature. The
-//! rest of X.509 path validation (names, key usages, CRL/OCSP) remains the
+//! issuer is compared here with the configured CA's name (its CA ID and
+//! the trust anchor ID attribute of its OIDs); the rest of X.509 path
+//! validation (key usages, CRL/OCSP, anything beyond the issuer) remains the
 //! TLS client's job. Expiry is checked here for convenience, because the
 //! `Validity` is already parsed.
 
@@ -36,6 +38,12 @@ pub type CosignerEntry = (TrustAnchorId, Box<dyn CosignatureVerifier>);
 /// Configuration" section).
 pub struct RelyingPartyConfig {
     pub ca_id: TrustAnchorId,
+    /// The CA's OIDs, as its CA certificate gives them
+    /// ([`crate::CaCertificate::oids`]). Only the trust anchor ID attribute
+    /// is compared ([`der::OidSet::same_name_attribute`]): a certificate
+    /// whose issuer uses another attribute does not name this CA, even with
+    /// the same CA ID (AUDIT.md §25).
+    pub ca_oids: der::OidSet,
     /// Each recognized cosigner with its verifier.
     pub cosigners: Vec<CosignerEntry>,
     /// The policy, in its simplest form: **all** of these must have
@@ -143,10 +151,12 @@ pub fn verify_certificate(
     }
     let log_number = log_number as u16;
     // The issuer's attribute must belong to the set the signature algorithm
-    // names: one set per certificate.
+    // names (one set per certificate, AUDIT.md §22), and be the configured
+    // CA's: path validation chains names, and a name includes its
+    // attribute's type (§24, §25).
     let issuer = der::ca_id_from_name(fields.issuer.raw, &cert.oids)
         .map_err(|_| VerifyError::UnknownIssuer)?;
-    if issuer != cfg.ca_id {
+    if issuer != cfg.ca_id || !cert.oids.same_name_attribute(&cfg.ca_oids) {
         return Err(VerifyError::UnknownIssuer);
     }
     let log_id = cfg.ca_id.log_id(log_number)?;

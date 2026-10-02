@@ -55,7 +55,9 @@
 //! does not persist the log to disk (only the guard's counter). A CA here
 //! writes the IANA-assigned OIDs unless configured otherwise
 //! ([`CaConfig::oids`]), and a relying party accepts those and the two
-//! experimental sets that preceded them ([`der::KNOWN_OID_SETS`]).
+//! experimental sets that preceded them ([`der::KNOWN_OID_SETS`]), one set
+//! per certificate and under a CA whose name uses the same attribute
+//! ([`verify::RelyingPartyConfig::ca_oids`]).
 
 pub mod ca;
 pub mod cacert;

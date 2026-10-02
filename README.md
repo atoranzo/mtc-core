@@ -322,6 +322,7 @@ pub struct CosignedMessage {
 ```rust
 pub struct RelyingPartyConfig {
     pub ca_id: TrustAnchorId,
+    pub ca_oids: OidSet,                          // the CA certificate's; its name attribute is compared
     pub cosigners: Vec<(TrustAnchorId, Box<dyn CosignatureVerifier>)>,
     pub required_cosigners: Vec<TrustAnchorId>,   // witnesses/mirrors; the CA is always required
     pub trusted_subtrees: Vec<TrustedSubtree>,    // predistributed landmarks
@@ -403,7 +404,11 @@ same proofs as the literal RFC 9162 recursion.
    trailing bytes.
 2. Non-negative 64-bit `serial`; reject if it falls in a revoked range.
 3. `index = serial & (2^48-1)`, `log_number = serial >> 48` (zero: reject).
-4. `issuer` must be the `Name` of the configured CA ID; `log_id = caID.0.N`.
+4. `issuer` must be the `Name` of the configured CA: its CA ID (`ca_id`)
+   under the trust anchor ID attribute of the set `signatureAlgorithm` names
+   (one set per certificate), and that attribute must be the CA's
+   (`ca_oids`, from its CA certificate); otherwise `UnknownIssuer`.
+   `log_id = caID.0.N`.
 5. Rebuild the entry **from the `TBSCertificate`** (version, issuer, validity,
    subject, key algorithm, `OCTET STRING(SHA256(SPKI))`, the rest) and hash it
    with `0x00` in front.
@@ -541,7 +546,8 @@ per version, one ledger entry per change) and none of the STARK code.
   so), nor `hbs-state`. The OIDs are the IANA-assigned ones by default
   (`CaConfig::oids`), and a relying party here also accepts the two
   experimental sets of the `1.3.6.1.4.1.44363.47` arc that have been on the
-  wire (AUDIT.md §18); the draft may still change: the version read is the PLANTS working group's working repository as
+  wire (AUDIT.md §18), one set per certificate and each under a CA whose
+  name uses the same attribute (§22, §25); the draft may still change: the version read is the PLANTS working group's working repository as
   of September 29, 2026. It did pass an internal adversarial review (six
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is

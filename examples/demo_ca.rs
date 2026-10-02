@@ -133,6 +133,7 @@ fn main() {
         .collect();
     let rp = RelyingPartyConfig {
         ca_id,
+        ca_oids: mtc_core::OIDS_IANA, // the CA's, as its CA certificate would say
         cosigners,
         required_cosigners: vec![witness_id], // the CA's is always required
         trusted_subtrees: trusted,

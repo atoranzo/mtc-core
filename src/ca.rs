@@ -56,7 +56,10 @@ pub struct CaConfig {
     pub max_cert_lifetime: u64,
     /// The OIDs this CA writes: [`der::OIDS_IANA`] unless a relying party
     /// that predates the IANA assignment has to read it. It goes into the
-    /// issuer of every entry, so it is fixed for the life of the log.
+    /// issuer of every entry, and a relying party here ties its name
+    /// attribute to the CA (`verify::RelyingPartyConfig::ca_oids`, from the
+    /// CA certificate), so it is fixed for the life of the CA: another set
+    /// of OIDs means another CA (AUDIT.md §24, §25).
     pub oids: der::OidSet,
 }
 

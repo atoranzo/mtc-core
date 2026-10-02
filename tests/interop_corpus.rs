@@ -5,9 +5,10 @@
 //! (Go, `-version plants-07`, before and after the tool switched to the
 //! IANA-assigned OIDs; the provenance is in each README), plus the verdict
 //! the Go verifier gave to each certificate. This test hands the same files to this crate's
-//! verifier and requires the same verdicts, negative cases included; then
-//! it rebuilds the issuance log from the Go tool's entry tiles and checks
-//! its signed checkpoint. No Go is needed to run it: the corpus is data.
+//! verifier and requires the same verdicts, negative cases included, and
+//! the refusal of each corpus under the other's CA certificate; then it
+//! rebuilds the issuance log from the Go tool's entry tiles and checks its
+//! signed checkpoint. No Go is needed to run it: the corpus is data.
 //!
 //! What it does NOT cover: the other direction (certificates from here
 //! verified by the Go tool), which needs Go and runs from
@@ -78,6 +79,7 @@ fn relying_party(c: &Corpus, ca: &CaCertificate) -> RelyingPartyConfig {
     assert_eq!(set, MlDsaParameterSet::MlDsa44);
     let mut rp = RelyingPartyConfig {
         ca_id: ca.ca_id.clone(),
+        ca_oids: ca.oids,
         cosigners: vec![entry],
         required_cosigners: vec![],
         trusted_subtrees: vec![],
@@ -172,6 +174,36 @@ fn every_verdict_of_the_go_verifier_is_reproduced_in(c: &Corpus) {
         checked += 1;
     }
     assert_eq!(checked, 26);
+}
+
+/// A CA certificate fixes the issuer's name attribute (AUDIT.md §25). The
+/// two corpora share the CA ID `32473.1` and its key; under the other
+/// corpus's CA certificate and policy, every certificate fails, and the 21
+/// its own CA accepts fail as `UnknownIssuer`. Before §25, twelve of them
+/// verified (the cosigned ones whose subtree is not one of the other
+/// corpus's landmarks) and the rest failed as `TrustedSubtreeMismatch`.
+#[test]
+fn each_corpus_is_refused_under_the_other_corpus_ca_certificate() {
+    for (own, other) in [(&CORPORA[0], &CORPORA[1]), (&CORPORA[1], &CORPORA[0])] {
+        let other_ca = ca(other);
+        let rp = relying_party(other, &other_ca);
+        let mut refused = 0;
+        for line in read(own, "expected.txt").lines() {
+            let (name, expected) = line.split_once(' ').unwrap();
+            let result = verify_certificate(&certificate_der(own, name), &rp, NOW);
+            assert!(result.is_err(), "{}/{name}: {result:?}", own.dir);
+            if expected == "OK" {
+                assert_eq!(
+                    result,
+                    Err(VerifyError::UnknownIssuer),
+                    "{}/{name}",
+                    own.dir
+                );
+                refused += 1;
+            }
+        }
+        assert_eq!(refused, 21, "{}", own.dir);
+    }
 }
 
 #[test]

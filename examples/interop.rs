@@ -739,6 +739,7 @@ fn verify(args: &[String]) -> Res<bool> {
     );
     let mut rp = RelyingPartyConfig {
         ca_id: ca.ca_id.clone(),
+        ca_oids: ca.oids,
         cosigners: vec![ca_entry],
         required_cosigners: require,
         trusted_subtrees: Vec::new(),

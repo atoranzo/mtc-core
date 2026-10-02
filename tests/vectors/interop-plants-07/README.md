@@ -6,7 +6,10 @@ plants-07` at commit `99097c9e`, which wrote the interim experimental OID set:
 `ad4256b` ("We have PKIX OIDs!") switched `plants-07` to the IANA-assigned OIDs,
 and no tool writes this set any more. It is kept because it is what AUDIT.md
 §14 and §15 measured, and because a relying party here still accepts it
-(`der::OIDS_EXPERIMENTAL_47_5`). The IANA corpus is `../interop-iana/`.
+(`der::OIDS_EXPERIMENTAL_47_5`) under a CA certificate of the experimental
+OIDs, such as this corpus's own; under the IANA corpus's, with the same CA ID
+and key, it refuses every certificate (AUDIT.md §25). The IANA corpus is
+`../interop-iana/`.
 
 Everything in this directory except this file and `expected.txt` is the
 output of the draft's reference implementation, unchanged:
@@ -42,5 +45,6 @@ output of the draft's reference implementation, unchanged:
 
 `tests/interop_corpus.rs` requires this crate's verifier to give the same
 26 verdicts, checks the negatives fail for the reason they were built for,
+checks that each corpus is refused under the other's CA certificate,
 rebuilds the log from the tiles and checks the checkpoint's root and the
 CA's signature line.

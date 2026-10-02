@@ -1172,3 +1172,100 @@ on the same CA. It is the author's decision; this commit changes no code.
 the answer showed that this crate checked less than its own documentation
 said. The draft's author wrote the rule for CAs; what it asks of a relying
 party had to be measured here.
+
+## §25 · One name attribute per CA: the issuer is compared with the CA's name, attribute included
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**The decision.** The author's, on 2026-10-02: option (2) of §24 now, and
+option (4) when `draft-07` is cut (the interim `.47.5` set retired; decided,
+not done here).
+
+**What changed.** `RelyingPartyConfig` gains `ca_oids`, the CA certificate's
+set (`CaCertificate::oids`), and `verify_certificate` refuses with
+`UnknownIssuer` a certificate whose set does not use the CA's trust anchor ID
+attribute (`OidSet::same_name_attribute`). With the rule of §22 (the issuer's
+attribute is the one the signature algorithm names), the issuer is now
+compared with the CA's name as path validation compares names: the CA ID and
+the attribute's type. `UnknownIssuer`'s documentation, which §24 found
+overstated, is now true. `interop verify -ca-cert
+tests/vectors/interop-iana/ca_cert.pem tests/vectors/interop-plants-07/cert_10_0.pem`
+prints `UnknownIssuer` where §24 measured OK, and so does the reverse
+pairing. The four places that build a configuration take the set from the
+CA certificate (`examples/interop.rs`, `tests/interop_corpus.rs`), from the
+CA's own configuration (`tests/end_to_end.rs`), or write IANA, which is what
+its CA writes (`examples/demo_ca.rs`).
+
+**The attribute alone, not §24's wording.** §24 recommended comparing the
+CA-level OIDs, the attribute and the Merkle Tree CA extension. The review
+below pointed out that name chaining compares only the attribute; the CA
+extension is the CA's own (its hash and tree construction), a certificate
+does not carry it, and reading one off `id-alg-mtcProof` through this crate's
+table is an inference the draft does not support. In the three known sets
+the attribute and the extension change together, so no verdict differs; the
+two comparisons part only for a set built by hand. `id-alg-mtcProof` is not
+compared either: a CA certificate does not carry it, so `-06` and `.47.5`
+stay alike under one CA, and David Benjamin's second thread (§24) allows a
+later certificate format with a new algorithm on the same CA.
+
+**Tests.** Three new and one strengthened:
+`a_certificate_of_another_family_is_refused_under_the_same_ca_id`
+(`tests/end_to_end.rs`: IANA under experimental, `-06` and `.47.5` under
+IANA refused; `-06` under `-06`, `.47.5` under `-06` and IANA under IANA
+accepted, with the set reported); `each_corpus_is_refused_under_the_other_corpus_ca_certificate`
+(`tests/interop_corpus.rs`: each corpus under the other's CA certificate and
+policy, every certificate fails and the 21 its own CA accepts fail as
+`UnknownIssuer`; without the check twelve of them verified and the rest
+failed as `TrustedSubtreeMismatch`); `a_ca_is_matched_by_its_name_attribute_alone`
+(`src/der.rs`, with sets built by hand that share only the attribute or only
+the extension); and `a_certificate_that_mixes_oid_sets_is_refused` now also
+verifies the mixed certificate under a CA of the set its algorithm names,
+where only the rule of §22 can refuse it.
+
+**The review.** Before the commit, four independent reviewers (correctness,
+completeness, the tests, conformance with the draft), each finding put to a
+skeptic. Real, and fixed: (1) the test of §22 had stopped guarding its rule.
+Its relying party now carried the issuer's set, so the new check refused the
+mixed certificate first; with the rule of §22 removed (the issuer read under
+any known set, the change §19 named), all 71 tests passed. The strengthened
+assertion above is the fix. (2) README section 4.3, the relying party's
+steps, did not mention the check. (3) `CaConfig::oids` said the set is fixed
+"for the life of the log"; it is the life of the CA. (4) The module
+documentation of `verify.rs` left "names" to the TLS client. (5) The interim
+corpus's README said this crate "still accepts it", which is now conditional,
+and a test comment overstated what verified before the check. (6) The CA
+extension in the comparison (above), and no test that told it from the
+attribute. The conformance reviewer judged the pin consistent with the
+draft's relying-party configuration and with path validation, and found no
+conforming certificate that it refuses.
+
+**Falsified**, four mutations, each restored: without the new check, exactly
+the two new integration tests fail; without the rule of §22, its test fails
+at the new assertion (before the review, nothing did); with full equality of
+the set instead, the interim corpus fails (`every_verdict…`,
+`the_negative_cases…`) and so does the row `.47.5` under `-06`, which is why
+the comparison is not of the whole set; with the CA extension instead of the
+attribute, the new unit test fails.
+
+**Interoperability.** `interop/run.sh` against `demo/` at `38014f7`:
+`failures: 0`. `interop/run-openssl.sh`: `failures: 0`, with the known
+difference of §19 unchanged. No verdict moved: every pairing in those runs is
+a CA certificate with certificates of its own family. The new difference
+with OpenSSL and Bob Beck's `mtc`, which tie no set to a CA (§24) and accept
+cross-family pairings that this crate now refuses, is exercised by no run:
+no CA measured writes it.
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo doc --no-deps`: no warnings ·
+`cargo test`: 72/0 (69 before, plus three) · without `ml-dsa`: 56/0
+(the unit test in `der.rs` runs there too).
+
+**What it does not close.** The author's run on his machine; and, at
+`draft-07`, retiring `.47.5`, after which the CA certificate fixes the exact
+set with no configuration.
+
+**Lesson.** The first falsification checked that the new tests fail without
+the new check. It did not check that the old test still fails without the
+old rule. A new check can shadow an old one, and a test that passed for the
+right reason can go on passing for the wrong one; each rule needs a case in
+which it alone refuses.

@@ -36,7 +36,9 @@ pub const ARC_MTC_EXPERIMENTAL: [u64; 8] = [1, 3, 6, 1, 4, 1, 44363, 47];
 ///
 /// A CA emits one set ([`crate::CaConfig::oids`]). A relying party accepts
 /// the [`KNOWN_OID_SETS`], **one set per certificate**: the issuer's
-/// attribute must belong to the set its signature algorithm names.
+/// attribute must belong to the set its signature algorithm names; and that
+/// attribute must be the configured CA's
+/// ([`crate::verify::RelyingPartyConfig::ca_oids`], [`OidSet::same_name_attribute`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OidSet {
     pub name: &'static str,
@@ -99,6 +101,18 @@ impl OidSet {
         } else {
             None
         }
+    }
+
+    /// Whether names in `other` use the same trust anchor ID attribute: what
+    /// X.509 name chaining compares between a certificate's issuer and its
+    /// CA's subject, beyond the CA ID itself. Nothing else is compared.
+    /// `id-alg-mtcProof` is not in a CA certificate, so the two experimental
+    /// sets are alike here, and a later certificate format may come with a
+    /// new signature algorithm on the same CA; the Merkle Tree CA extension
+    /// is the CA's own (its hash and tree construction), and a certificate
+    /// does not carry it (AUDIT.md §24, §25).
+    pub fn same_name_attribute(&self, other: &OidSet) -> bool {
+        self.rdna_trust_anchor_id == other.rdna_trust_anchor_id
     }
 
     /// Parse a name for `-oids` on a command line: `iana`, `experimental-06`
@@ -684,6 +698,30 @@ mod tests {
             ca_id_from_name(&name, &OIDS_EXPERIMENTAL_06),
             Err(DerError::NotACaIdName)
         );
+    }
+
+    #[test]
+    fn a_ca_is_matched_by_its_name_attribute_alone() {
+        // The two experimental sets differ only in `id-alg-mtcProof`.
+        assert!(OIDS_EXPERIMENTAL_47_5.same_name_attribute(&OIDS_EXPERIMENTAL_06));
+        assert!(!OIDS_IANA.same_name_attribute(&OIDS_EXPERIMENTAL_06));
+        assert!(!OIDS_EXPERIMENTAL_47_5.same_name_attribute(&OIDS_IANA));
+        for s in KNOWN_OID_SETS {
+            assert!(s.same_name_attribute(&s));
+        }
+        // Built by hand, to tell the attribute from the CA extension: only
+        // the attribute counts (AUDIT.md §25).
+        let iana_ext = OidSet {
+            mtc_ca_sha256: OIDS_EXPERIMENTAL_06.mtc_ca_sha256,
+            ..OIDS_IANA
+        };
+        assert!(iana_ext.same_name_attribute(&OIDS_IANA));
+        let other_attr = OidSet {
+            rdna_trust_anchor_id: OIDS_EXPERIMENTAL_06.rdna_trust_anchor_id,
+            ..OIDS_IANA
+        };
+        assert!(!other_attr.same_name_attribute(&OIDS_IANA));
+        assert!(!OIDS_IANA.same_name_attribute(&other_attr));
     }
 
     #[test]
