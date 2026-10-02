@@ -1260,9 +1260,17 @@ no CA measured writes it.
 `cargo test`: 72/0 (69 before, plus three) · without `ml-dsa`: 56/0
 (the unit test in `der.rs` runs there too).
 
-**What it does not close.** The author's run on his machine; and, at
-`draft-07`, retiring `.47.5`, after which the CA certificate fixes the exact
-set with no configuration.
+**On the author's machine**, at `f19d4fb`, 2026-10-02 (WSL2, rustc 1.97.1,
+Go 1.27.1): `cargo fmt --check` and `cargo clippy --all-targets -- -D
+warnings` clean; `cargo test` 72/0 (50 + 7 + 1 + 5 + 2 + 7); without
+`ml-dsa` 56/0 (46 + 1 + 2 + 7). `interop/run.sh` at 15:56:37 UTC against
+`demo/` at `38014f7`, built by the script (no tracked changes): 26/26 Go →
+Rust, 9/9 Rust → Go with both CA certificates, the log rebuilt to
+`i35OIgqu…`, `failures: 0`. `interop/run-openssl.sh`: `failures: 0`, exit
+status 0, with the known difference of §19. The same as in the container.
+
+**What it does not close.** At `draft-07`, retiring `.47.5`, after which the
+CA certificate fixes the exact set with no configuration.
 
 **Lesson.** The first falsification checked that the new tests fail without
 the new check. It did not check that the old test still fails without the
