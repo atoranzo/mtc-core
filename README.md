@@ -546,18 +546,30 @@ per version, one ledger entry per change) and none of the STARK code.
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is
   corrected and covered by tests, and that is no substitute for an audit.
-- **Interoperability is measured against one implementation, in one
-  setting.** The `demo/` directory of the draft's repository (a generator and
-  a verifier in Go, commit `99097c9e`, `-version plants-07`) is the one
-  measured. It is not the only other implementation of the current design:
-  since 2026-09-29 there are at least two more, OpenSSL's (pull request
+- **Interoperability is measured against three implementations, and only
+  the first on the author's machine so far.** The `demo/` directory of the
+  draft's repository (a generator and a verifier in Go, commit `99097c9e`,
+  `-version plants-07`) was the first measured. Since 2026-09-29 there are two
+  more, announced on the working group's list with an end-to-end
+  demonstration (AUDIT.md §17): OpenSSL's (pull request
   `openssl/openssl#33014`, the TLS client and server side in C) and Bob Beck's
   rewrite of Cloudflare's Go CA and mirror for `-06`
-  (`github.com/bob-beck/cloudflare-mtc`), announced on the working group's list
-  with an end-to-end demonstration; neither is measured here yet (AUDIT.md
-  §17). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
-  since `ad4256b`, and the measurement was repeated against it at `38014f7`,
-  with the same verdicts (§18). Cloudflare's own `bwesterb/mtc` still follows the earlier batch
+  (`github.com/bob-beck/cloudflare-mtc`). Against those two, at `ecf0476` and
+  `c6cdfe2`, with `interop/run-openssl.sh` (§19): his verifier gives every
+  certificate from here, with either OID set, the verdict expected of it; his
+  CA's 20 certificates, issued through his mirror, and four negatives cut from
+  them byte by byte get the same verdict here as from his verifier, in four
+  configurations; OpenSSL's `s_client` accepts this crate's standalone and
+  landmark-relative certificates in a TLS 1.3 handshake with its `s_server`,
+  which picks between them by trust anchor ID, and refuses the five negatives;
+  and OpenSSL's own test corpus gets the same verdicts here as from his
+  verifier, except one certificate that mixes the IANA signature algorithm
+  with the experimental issuer, which both accept and this crate refuses (a
+  policy difference, recorded in §19). That run was made by the assistant in a
+  container; the author has not repeated it yet. The OIDs changed meanwhile:
+  `demo/` writes the IANA-assigned ones since `ad4256b`, and the measurement
+  was repeated against it at `38014f7`, with the same verdicts (§18).
+  Cloudflare's own `bwesterb/mtc` still follows the earlier batch
   design. Against `demo/`, in both directions
   and with negatives, everything measured agrees: its 26 verdicts are
   reproduced here (`tests/interop_corpus.rs`, offline), its log of 2122
@@ -569,8 +581,9 @@ per version, one ledger entry per change) and none of the STARK code.
   and repeated by the author on his machine with the same result (§15).
   Not measured: any other implementation, cosigners with ECDSA or Ed25519
   keys (their cosignatures are ignored here), the Go tool's cosigner groups
-  (this crate's policy is "the CA and all of these"), and the witness
-  protocol.
+  (this crate's policy is "the CA and all of these"), the witness and mirror
+  protocols (this crate has neither), and anything of TLS beyond the
+  certificate: both ends of the handshake are OpenSSL's.
 - **There is no request validation**: `CertificateRequest` arrives validated.
   Certifying what arrives is this crate's job; that it is true, the operator's.
 - **The log is not persisted**, only the guardian's counter. And `MemoryGuard`

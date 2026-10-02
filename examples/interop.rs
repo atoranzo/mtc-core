@@ -6,9 +6,11 @@
 //! same policy vocabulary go through both verifiers. `interop/README.md`
 //! has the procedure; `AUDIT.md` the record of each run.
 //!
-//!     cargo run --release --example interop -- generate -out DIR [-oids iana|experimental-47.5|experimental-06]
+//!     cargo run --release --example interop -- generate -out DIR \
+//!         [-oids iana|experimental-47.5|experimental-06] [-tls-key PUBLIC_KEY_PEM]
 //!     cargo run --release --example interop -- verify -ca-cert FILE \
-//!         [-policy FILE] [-require ID]... [-now UNIX] CERT...
+//!         [-policy FILE] [-subtrees FILE] [-cosigner-cert FILE]... \
+//!         [-require ID]... [-now UNIX] CERT...
 //!     cargo run --release --example interop -- checkpoint -dir DIR -ca-cert FILE \
 //!         [-log-number N]
 //!
@@ -18,22 +20,35 @@
 //! one verdict per certificate, in the Go tool's format. `checkpoint`
 //! rebuilds the issuance log from the Go tool's entry tiles and checks its
 //! signed checkpoint.
+//!
+//! The same configuration is also written, and read, in the files of
+//! OpenSSL's MTC options (`-mtc_subtrees`, `-mtc_cosigners`), which Bob
+//! Beck's `mtc verify` reads as well: `generate` writes `subtrees.txt` and
+//! `cosigners.pem`, and `verify` takes them with `-subtrees` and
+//! `-cosigner-cert`. With `-tls-key`, `generate` also issues certificates
+//! for that key (the DNS name `localhost`) for a TLS handshake with
+//! OpenSSL, and `tls_chains.txt` says which trust anchor ID and groups to
+//! decorate each with (`openssl generate_tai_chain`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use mtc_core::cacert::{ml_dsa_verifier_from_spki, CaCertificate, MTC_MIN_SERIAL};
+use mtc_core::cacert::{
+    ml_dsa_verifier_from_spki, CaCertificate, MTC_MIN_SERIAL, OID_ALG_UNSIGNED, OID_RDNA_UNSIGNED,
+};
 use mtc_core::cosign::mldsa::{tlog_key_id_for, MlDsa44, MlDsaCosigner};
 use mtc_core::cosign::CosignedMessage;
 use mtc_core::der;
 use mtc_core::pem;
 use mtc_core::proof::MAX_U48;
 use mtc_core::spki::{self, MlDsaParameterSet};
-use mtc_core::verify::{verify_certificate, Basis, RelyingPartyConfig, TrustedSubtree};
+use mtc_core::verify::{
+    verify_certificate, Basis, CosignerEntry, RelyingPartyConfig, TrustedSubtree,
+};
 use mtc_core::{
     CaConfig, CertificateRequest, CertificationAuthority, IssuanceLog, MemoryGuard, MtcCertificate,
-    Subtree, TrustAnchorId, Validity,
+    OidSet, Subtree, TrustAnchorId, Validity, KNOWN_OID_SETS,
 };
 
 type Res<T> = Result<T, String>;
@@ -64,7 +79,7 @@ fn main() -> ExitCode {
         Some("checkpoint") => checkpoint(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  interop generate -out DIR [-oids iana|experimental-47.5|experimental-06]\n  interop verify -ca-cert FILE [-policy FILE] [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
+                "usage:\n  interop generate -out DIR [-oids iana|experimental-47.5|experimental-06] [-tls-key PUBLIC_KEY_PEM]\n  interop verify -ca-cert FILE [-policy FILE] [-subtrees FILE] [-cosigner-cert FILE]... [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
             );
             return ExitCode::from(2);
         }
@@ -106,15 +121,110 @@ fn read_ca_certificates(paths: &[String]) -> Res<Vec<CaCertificate>> {
     Ok(out)
 }
 
+/// A cosigner certificate in the form OpenSSL's `-mtc_cosigners` and Bob
+/// Beck's `mtc verify --cosigner-cert` read: the CA certificate's unsigned
+/// shape (RFC 9925), with the cosigner ID as subject, the cosigner's key,
+/// and no extensions. The draft does not define it; it is configuration
+/// for those relying parties, not something this crate's verifier needs.
+fn cosigner_certificate(
+    id: &TrustAnchorId,
+    spki: &[u8],
+    validity: &Validity,
+    oids: &OidSet,
+) -> Vec<u8> {
+    let mut placeholder = der::oid(&OID_RDNA_UNSIGNED);
+    placeholder.extend(der::tlv(0x0c, &[])); // an empty UTF8String
+    let issuer = der::sequence(&der::set(&der::sequence(&placeholder)));
+    let mut tbs = der::explicit(0, &der::integer_u64(2));
+    tbs.extend(der::integer_u64(1));
+    tbs.extend(der::algorithm_identifier(&OID_ALG_UNSIGNED));
+    tbs.extend(issuer);
+    tbs.extend(validity.to_der());
+    tbs.extend(der::name_from_ca_id(id, oids));
+    tbs.extend_from_slice(spki);
+    let mut cert = der::sequence(&tbs);
+    cert.extend(der::algorithm_identifier(&OID_ALG_UNSIGNED));
+    cert.extend(der::bit_string(&[]));
+    der::sequence(&cert)
+}
+
+/// Reads cosigner certificates (see [`cosigner_certificate`]), from here or
+/// from another implementation: the subject is one trust anchor ID
+/// attribute of any known OID set, the key ML-DSA, and a certificate that
+/// carries the MTC CA extension is refused (it belongs in `-ca-cert`).
+fn read_cosigner_certificates(paths: &[String]) -> Res<Vec<CosignerEntry>> {
+    let mut out = Vec::new();
+    for p in paths {
+        let text = fs::read_to_string(p).map_err(|e| format!("{p}: {e}"))?;
+        for block in pem::decode_all(&text).map_err(|e| format!("{p}: {e}"))? {
+            if block.label != "CERTIFICATE" {
+                continue;
+            }
+            let parts = der::parse_certificate(&block.der).map_err(|e| format!("{p}: {e:?}"))?;
+            let fields = der::parse_tbs(parts.tbs.raw).map_err(|e| format!("{p}: {e:?}"))?;
+            let mut tail = fields.after_spki;
+            while !tail.is_empty() {
+                let (t, next) = der::read_tlv(tail).map_err(|e| format!("{p}: {e:?}"))?;
+                if t.tag == 0xa3 {
+                    let (seq, _) = der::expect_tlv(t.content, der::TAG_SEQUENCE)
+                        .map_err(|e| format!("{p}: {e:?}"))?;
+                    let mut cur = seq.content;
+                    while !cur.is_empty() {
+                        let (ext, rest) = der::expect_tlv(cur, der::TAG_SEQUENCE)
+                            .map_err(|e| format!("{p}: {e:?}"))?;
+                        cur = rest;
+                        let (oid, _) = der::expect_tlv(ext.content, der::TAG_OID)
+                            .map_err(|e| format!("{p}: {e:?}"))?;
+                        let arcs =
+                            spki::oid_arcs(oid.content).map_err(|e| format!("{p}: {e:?}"))?;
+                        if OidSet::from_mtc_ca_extension(&arcs).is_some() {
+                            return Err(format!(
+                                "{p}: a CA certificate, not a cosigner certificate (use -ca-cert)"
+                            ));
+                        }
+                    }
+                }
+                tail = next;
+            }
+            let id = KNOWN_OID_SETS
+                .iter()
+                .find_map(|set| der::ca_id_from_name(fields.subject.raw, set).ok())
+                .ok_or_else(|| format!("{p}: the subject is not a trust anchor ID"))?;
+            let (_, verifier) =
+                ml_dsa_verifier_from_spki(fields.spki.raw).map_err(|e| format!("{p}: {e}"))?;
+            out.push((id, verifier));
+        }
+    }
+    Ok(out)
+}
+
+/// The lines of an OpenSSL `-mtc_subtrees` file (`<id> <log> <start> <end>
+/// <hash>`) are the Go tool's `trusted-subtree` lines without the keyword.
+fn subtrees_as_policy(text: &str) -> String {
+    text.lines()
+        .map(|l| {
+            let t = l.trim();
+            if t.is_empty() || t.starts_with('#') {
+                String::new()
+            } else {
+                format!("trusted-subtree {t}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // ───────────────────────── generate ─────────────────────────
 
 fn generate(args: &[String]) -> Res<()> {
     let mut out = PathBuf::from("out");
     let mut oids = mtc_core::OIDS_IANA;
+    let mut tls_key = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "-out" => out = PathBuf::from(flag_value(args, &mut i, "-out")?),
+            "-tls-key" => tls_key = Some(flag_value(args, &mut i, "-tls-key")?.to_string()),
             "-oids" => {
                 let v = flag_value(args, &mut i, "-oids")?;
                 oids = mtc_core::OidSet::from_flag(v).ok_or_else(|| {
@@ -340,8 +450,87 @@ fn generate(args: &[String]) -> Res<()> {
     )?;
     fs::write(out.join("EXPECTED.txt"), &expected).map_err(|e| e.to_string())?;
 
+    // ── for a TLS handshake with OpenSSL: one more entry, for the given
+    //    key, covered by a third landmark. After the corpus, so that none
+    //    of the corpus's certificates changes. ──
+    if let Some(path) = &tls_key {
+        let text = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let spki_der = pem::decode_all(&text)
+            .map_err(|e| format!("{path}: {e}"))?
+            .into_iter()
+            .find(|b| b.label == "PUBLIC KEY")
+            .ok_or_else(|| format!("{path}: no PUBLIC KEY block"))?
+            .der;
+        spki::parse(&spki_der).map_err(|e| format!("{path}: {e:?}"))?;
+        let index = ca
+            .submit(CertificateRequest {
+                subject: der::sequence(&[]),
+                spki: spki_der,
+                validity: Validity {
+                    not_before: now - 3600,
+                    not_after: now - 3600 + 30 * DAY,
+                },
+                extensions: Some(der::san_dns_extensions(&["localhost"])),
+                log_entry_extensions: vec![],
+            })
+            .map_err(|e| format!("{e:?}"))?;
+        checkpoint(&mut ca, &mut clock)?;
+        clock += 1;
+        let l3 = ca
+            .allocate_landmark(clock)
+            .map_err(|e| format!("{e:?}"))?
+            .ok_or("no landmark")?;
+        let ca_text = ca_id.to_ascii();
+        let landmark_id = ca_id
+            .landmark_id(1, l3.number)
+            .map_err(|e| format!("{e:?}"))?
+            .to_ascii();
+        let mut chains = String::from(
+            "# file, then the arguments of `openssl generate_tai_chain` for it (draft section 8.2.1)\n",
+        );
+        let mut write_tls = |name: &str, cert: &MtcCertificate, props: &str| -> Res<()> {
+            let der = cert.to_der().map_err(|e| format!("{e:?}"))?;
+            MtcCertificate::from_der(&der).map_err(|e| format!("{name}: {e:?}"))?;
+            fs::write(out.join(name), pem::encode("CERTIFICATE", &der))
+                .map_err(|e| e.to_string())?;
+            println!(
+                "Wrote {name}: entry {index}, subtree {}, {} cosignature(s)",
+                cert.proof.subtree,
+                cert.proof.signatures.len()
+            );
+            chains.push_str(&format!("{name} {props}\n"));
+            Ok(())
+        };
+        let standalone_props = format!("-oid {ca_text} -group {ca_text}.2.{{0-}}.{{0-}}");
+        let landmark_props = format!(
+            "-oid {landmark_id} -group {ca_text}.2.1.{{{}-}} -trust-anchor-negotiation",
+            l3.number
+        );
+        write_tls(
+            "tls_standalone.pem",
+            &standalone(&ca, index)?,
+            &standalone_props,
+        )?;
+        let mut c = standalone(&ca, index)?;
+        c.proof.signatures.retain(|s| s.cosigner_id == ca_id);
+        write_tls("tls_standalone_caonly.pem", &c, &standalone_props)?;
+        let mut c = standalone(&ca, index)?;
+        flip(&mut c);
+        write_tls("tls_standalone_bitflip.pem", &c, &standalone_props)?;
+        write_tls("tls_landmark.pem", &relative(&ca, index)?, &landmark_props)?;
+        let mut c = relative(&ca, index)?;
+        flip(&mut c);
+        write_tls("tls_landmark_bitflip.pem", &c, &landmark_props)?;
+        fs::write(out.join("tls_chains.txt"), &chains).map_err(|e| e.to_string())?;
+        println!(
+            "Landmark {} at tree size {} covers the TLS entry. Wrote tls_chains.txt.\n",
+            l3.number, l3.tree_size
+        );
+    }
+
     // ── the policy for the Go verifier: the witness and the landmarks ──
     let mut policy = String::from("# Generated by mtc-core's `interop generate`: the witness cosigner and the trusted subtrees of the active landmarks.\n");
+    let mut subtrees = String::from("# Generated by mtc-core's `interop generate`: the trusted subtrees of the active landmarks, in the format of OpenSSL's -mtc_subtrees.\n");
     policy.push_str(&format!(
         "cosigner {} mldsa44 {}\n",
         witness_id.to_ascii(),
@@ -359,19 +548,28 @@ fn generate(args: &[String]) -> Res<()> {
             st,
             pem::base64_encode(&hash)
         );
-        policy.push_str(&format!(
-            "trusted-subtree {} 1 {} {} {}\n",
+        let line = format!(
+            "{} 1 {} {} {}\n",
             ca_id.to_ascii(),
             st.start,
             st.end,
             pem::base64_encode(&hash)
-        ));
+        );
+        policy.push_str(&format!("trusted-subtree {line}"));
+        subtrees.push_str(&line);
     }
     fs::write(out.join("policy.txt"), &policy).map_err(|e| e.to_string())?;
+    fs::write(out.join("subtrees.txt"), &subtrees).map_err(|e| e.to_string())?;
+    let witness_cert = cosigner_certificate(&witness_id, &witness_spki, &ca_cert.validity, &oids);
+    fs::write(
+        out.join("cosigners.pem"),
+        pem::encode("CERTIFICATE", &witness_cert),
+    )
+    .map_err(|e| e.to_string())?;
     fs::write(out.join("landmarks.txt"), ca.landmarks().publish(clock))
         .map_err(|e| e.to_string())?;
     println!(
-        "\nLandmarks allocated: {} (size {}) and {} (size {}). Wrote policy.txt, landmarks.txt and EXPECTED.txt.",
+        "\nLandmarks allocated for the corpus: {} (size {}) and {} (size {}). Wrote policy.txt, subtrees.txt, cosigners.pem, landmarks.txt and EXPECTED.txt.",
         l1.number, l1.tree_size, l2.number, l2.tree_size
     );
     Ok(())
@@ -486,6 +684,8 @@ fn apply_policy(text: &str, rp: &mut RelyingPartyConfig, notes: &mut Vec<String>
 fn verify(args: &[String]) -> Res<bool> {
     let mut ca_paths = Vec::new();
     let mut policy = None;
+    let mut subtree_files = Vec::new();
+    let mut cosigner_paths = Vec::new();
     let mut require = Vec::new();
     let mut now = unix_now();
     let mut certs = Vec::new();
@@ -494,6 +694,10 @@ fn verify(args: &[String]) -> Res<bool> {
         match args[i].as_str() {
             "-ca-cert" => ca_paths.push(flag_value(args, &mut i, "-ca-cert")?.to_string()),
             "-policy" => policy = Some(flag_value(args, &mut i, "-policy")?.to_string()),
+            "-subtrees" => subtree_files.push(flag_value(args, &mut i, "-subtrees")?.to_string()),
+            "-cosigner-cert" => {
+                cosigner_paths.push(flag_value(args, &mut i, "-cosigner-cert")?.to_string())
+            }
             "-require" => require.push(
                 TrustAnchorId::from_ascii(flag_value(args, &mut i, "-require")?)
                     .map_err(|e| format!("-require: {e:?}"))?,
@@ -544,6 +748,17 @@ fn verify(args: &[String]) -> Res<bool> {
     if let Some(p) = policy {
         let text = fs::read_to_string(&p).map_err(|e| format!("{p}: {e}"))?;
         apply_policy(&text, &mut rp, &mut notes)?;
+    }
+    for p in &subtree_files {
+        let text = fs::read_to_string(p).map_err(|e| format!("{p}: {e}"))?;
+        apply_policy(&subtrees_as_policy(&text), &mut rp, &mut notes)
+            .map_err(|e| format!("{p}: {e}"))?;
+    }
+    for (id, verifier) in read_cosigner_certificates(&cosigner_paths)? {
+        if rp.cosigners.iter().any(|(cid, _)| *cid == id) {
+            return Err(format!("cosigner {} defined twice", id.to_ascii()));
+        }
+        rp.cosigners.push((id, verifier));
     }
     for n in &notes {
         eprintln!("note: {n}");
