@@ -996,9 +996,11 @@ The line was restored.
 **The list.** Asking was the assistant's call, and the call is to ask: three
 implementations disagree on a certificate, the draft does not say what a
 relying party does with mixed OIDs during the transition, and the draft's
-principal author answered both issues of §17. One short question, as a reply in the
-author's thread of 2026-09-30, drafted and handed to him; not sent: sending is
-his. If the answer is to accept, `verify.rs` changes and this test turns over.
+principal author answered both issues of §17. One short question, drafted by
+the assistant and sent by the author on 2026-10-02 to `plants@ietf.org`, as a
+reply to his own message of 2026-09-30 ("Re: An independent Rust
+implementation of the -07 formats, interop-tested against demo/"). If the
+answer is to accept, `verify.rs` changes and this test turns over.
 
 **Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
 --all-targets -- -D warnings`: clean · `cargo test`: 69/0 (68 before, plus this test) · without
