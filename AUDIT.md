@@ -857,3 +857,50 @@ test, and another can let in what it was meant to leave out. The checks now
 look for the thing itself (the certificate served, the file by name), the
 script was made to fail on purpose, and its verdicts were read one by one
 before the result was written down.
+
+## §20 · The author's first run of `run-openssl.sh`: no `mtc` binary, read as a disagreement
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What happened.** The author ran `interop/run-openssl.sh` on his machine (WSL)
+at `8803b78`, with OpenSSL built from the same commit as §19 (`ecf0476`) and
+Bob Beck's repository at the same commit (`c6cdfe2`). Go was not installed
+(`Command 'go' not found`), so `go build -o mtc ./cmd/mtc` did not run and
+there was no `mtc` binary at the path given in `MTC`. The script did not say
+so. Part 1 printed, in both OID sets, "mtc verify against the expected
+verdicts: DIFFERENT verdicts" next to "mtc-core on the same OpenSSL-format
+inputs: same verdict for all 14 certificates (7 OK, 7 FAIL)"; part 2 stopped
+at its first call to `mtc` ("No such file or directory"), and parts 3 and 4
+did not run. The two "DIFFERENT" lines are not a disagreement: `mtc verify`
+never ran. The shell's "No such file or directory" went into the same pipe as
+a verifier's output, and the `|| true` that keeps a verifier's non-zero exit
+(any FAIL verdict) from stopping the script let it pass. Invoked by a relative
+path, as the author did, that line does not begin with `/`, so the verdict
+file came out empty, and an empty file differs from the expected one
+(reproduced here). Invoked by an absolute path, the same line would have been
+read as one more FAIL verdict, for a file named `run-openssl.sh`.
+
+**What changed.** `run-openssl.sh` checks, before it writes anything, that
+`MTC` is an executable that runs (`mtc --help`) and that `python3` is present,
+and says what is missing (exit 2); and a failed `cargo build` of the example,
+whose output is silenced, now says so instead of stopping without a word.
+Checked: with `MTC` pointing at a path that does not exist, and at a script
+that exits 1, the run stops with the message and no `results.txt`; with the
+real `mtc`, the full run at this commit gives the result of §19, `failures: 0`.
+
+**The order of things.** `next` was merged into `main` (`8803b78`) after this
+run, before parts 2 to 4 had run on the author's machine. Nothing in the
+library changed then or here; §19 stands as the assistant's run in a
+container, not yet repeated by the author.
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo test`: 68/0 · without `ml-dsa`:
+55/0. Only the script changed.
+
+**What it does not close.** The author's complete run (Go 1.27 or later, then
+`mtc` built, then the same command), and his gates, whose output was not in
+what he pasted.
+
+**Lesson.** A missing tool must not look like a verifier's answer. A check that
+tolerates failure (here, so that a FAIL verdict does not stop the run) needs
+the tool's presence checked first, or its silence reads as a result.
