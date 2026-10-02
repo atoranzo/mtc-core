@@ -6,7 +6,7 @@
 //! same policy vocabulary go through both verifiers. `interop/README.md`
 //! has the procedure; `AUDIT.md` the record of each run.
 //!
-//!     cargo run --release --example interop -- generate -out DIR
+//!     cargo run --release --example interop -- generate -out DIR [-oids iana|experimental-47.5|experimental-06]
 //!     cargo run --release --example interop -- verify -ca-cert FILE \
 //!         [-policy FILE] [-require ID]... [-now UNIX] CERT...
 //!     cargo run --release --example interop -- checkpoint -dir DIR -ca-cert FILE \
@@ -64,7 +64,7 @@ fn main() -> ExitCode {
         Some("checkpoint") => checkpoint(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  interop generate -out DIR\n  interop verify -ca-cert FILE [-policy FILE] [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
+                "usage:\n  interop generate -out DIR [-oids iana|experimental-47.5|experimental-06]\n  interop verify -ca-cert FILE [-policy FILE] [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
             );
             return ExitCode::from(2);
         }
@@ -110,10 +110,17 @@ fn read_ca_certificates(paths: &[String]) -> Res<Vec<CaCertificate>> {
 
 fn generate(args: &[String]) -> Res<()> {
     let mut out = PathBuf::from("out");
+    let mut oids = mtc_core::OIDS_IANA;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "-out" => out = PathBuf::from(flag_value(args, &mut i, "-out")?),
+            "-oids" => {
+                let v = flag_value(args, &mut i, "-oids")?;
+                oids = mtc_core::OidSet::from_flag(v).ok_or_else(|| {
+                    format!("-oids {v:?}: iana, experimental-47.5 or experimental-06")
+                })?
+            }
             other => return Err(format!("unknown flag {other}")),
         }
         i += 1;
@@ -139,18 +146,23 @@ fn generate(args: &[String]) -> Res<()> {
             not_before: now - DAY,
             not_after: now + 3650 * DAY,
         },
+        oids,
     };
     let ca_cert_der = ca_cert.to_der().map_err(|e| e.to_string())?;
     // Read back what was written: the same parser the relying party uses.
     CaCertificate::from_der(&ca_cert_der).map_err(|e| format!("own CA certificate: {e}"))?;
     let ca_path = out.join("ca_cert.pem");
     fs::write(&ca_path, pem::encode("CERTIFICATE", &ca_cert_der)).map_err(|e| e.to_string())?;
-    println!("Wrote CA certificate {:?}.\n", ca_path);
+    println!(
+        "Wrote CA certificate {:?} with the {} OIDs.\n",
+        ca_path, oids.name
+    );
 
     let cfg = CaConfig {
         ca_id: ca_id.clone(),
         log_number: 1,
         max_cert_lifetime: 90 * DAY,
+        oids,
     };
     let mut ca = CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default())
         .map_err(|e| format!("{e:?}"))?;
@@ -566,12 +578,13 @@ fn verify(args: &[String]) -> Res<bool> {
                         ),
                     }
                     println!(
-                        "- Serial {} (log {}, index {}), subtree {}, in CA range: {}",
+                        "- Serial {} (log {}, index {}), subtree {}, in CA range: {}, OIDs {}",
                         v.serial,
                         v.log_number,
                         v.index,
                         v.subtree,
-                        ca.covers_serial(v.serial)
+                        ca.covers_serial(v.serial),
+                        v.oids.name
                     );
                 }
                 Err(e) => {

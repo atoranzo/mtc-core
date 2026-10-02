@@ -1,4 +1,12 @@
-# The reference implementation's corpus (`plants-07` formats)
+# The reference implementation's corpus (`plants-07` formats, interim OIDs)
+
+⚠️ **Which `plants-07`.** This corpus is the reference tool's `-version
+plants-07` at commit `99097c9e`, which wrote the interim experimental OID set:
+`id-alg-mtcProof` `…44363.47.5` with `…47.3` and `…47.4`. The same day, commit
+`ad4256b` ("We have PKIX OIDs!") switched `plants-07` to the IANA-assigned OIDs,
+and no tool writes this set any more. It is kept because it is what AUDIT.md
+§14 and §15 measured, and because a relying party here still accepts it
+(`der::OIDS_EXPERIMENTAL_47_5`). The IANA corpus is `../interop-iana/`.
 
 Everything in this directory except this file and `expected.txt` is the
 output of the draft's reference implementation, unchanged:

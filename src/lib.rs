@@ -52,9 +52,10 @@
 //! `-version plants-07`) verifies here with the same verdicts it gets
 //! there, negatives included (`tests/interop_corpus.rs`; the other
 //! direction is `interop/run.sh`, which needs Go). It is not audited, it
-//! does not persist the log to disk (only the guard's counter), and the
-//! OIDs are the experimental ones from the 1.3.6.1.4.1.44363.47 arc that
-//! the draft reserves for that purpose.
+//! does not persist the log to disk (only the guard's counter). A CA here
+//! writes the IANA-assigned OIDs unless configured otherwise
+//! ([`CaConfig::oids`]), and a relying party accepts those and the two
+//! experimental sets that preceded them ([`der::KNOWN_OID_SETS`]).
 
 pub mod ca;
 pub mod cacert;
@@ -77,6 +78,7 @@ pub use cacert::CaCertificate;
 pub use cosign::{
     CosignError, CosignatureVerifier, CosignedMessage, Cosigner, SignedSubtree, SubtreeSignature,
 };
+pub use der::{OidSet, KNOWN_OID_SETS, OIDS_EXPERIMENTAL_06, OIDS_EXPERIMENTAL_47_5, OIDS_IANA};
 pub use entry::{LogEntryExtension, MtcLeaf, MtcLogEntry, Validity};
 pub use guard::{startup_check, MemoryGuard, SequenceGuard, StartupDecision, StartupRefusal};
 pub use hash::{HashValue, HASH_SIZE};

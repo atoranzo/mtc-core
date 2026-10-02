@@ -34,6 +34,7 @@ fn main() {
         ca_id: ca_id.clone(),
         log_number: 1,
         max_cert_lifetime: week,
+        oids: mtc_core::OIDS_IANA,
     };
     let mut ca =
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();

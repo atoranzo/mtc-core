@@ -1,9 +1,10 @@
 //! # The reference implementation's corpus, verified here
 //!
-//! `tests/vectors/interop-plants-07/` is the output of `demo generate` from
-//! the PLANTS working group's repository (Go, `-version plants-07`; the
-//! provenance is in its README), plus the verdict the Go verifier gave to
-//! each certificate. This test hands the same files to this crate's
+//! `tests/vectors/interop-plants-07/` and `tests/vectors/interop-iana/` are
+//! the output of `demo generate` from the PLANTS working group's repository
+//! (Go, `-version plants-07`, before and after the tool switched to the
+//! IANA-assigned OIDs; the provenance is in each README), plus the verdict
+//! the Go verifier gave to each certificate. This test hands the same files to this crate's
 //! verifier and requires the same verdicts, negative cases included; then
 //! it rebuilds the issuance log from the Go tool's entry tiles and checks
 //! its signed checkpoint. No Go is needed to run it: the corpus is data.
@@ -28,19 +29,37 @@ use mtc_core::{pem, IssuanceLog, Subtree, TrustAnchorId, VerifyError};
 /// 2026-09-21, inside the corpus's validity (2020-01-01 to 2030-12-31).
 const NOW: u64 = 1_790_000_000;
 
-fn dir() -> PathBuf {
+/// The two corpora of the reference tool: the interim experimental OIDs of
+/// AUDIT.md §14, and the IANA OIDs of §18. Same configuration, same verdicts.
+struct Corpus {
+    dir: &'static str,
+    oids: mtc_core::OidSet,
+}
+
+const CORPORA: [Corpus; 2] = [
+    Corpus {
+        dir: "interop-plants-07",
+        oids: mtc_core::OIDS_EXPERIMENTAL_47_5,
+    },
+    Corpus {
+        dir: "interop-iana",
+        oids: mtc_core::OIDS_IANA,
+    },
+];
+
+fn dir(c: &Corpus) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("vectors")
-        .join("interop-plants-07")
+        .join(c.dir)
 }
 
-fn read(name: &str) -> String {
-    std::fs::read_to_string(dir().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+fn read(c: &Corpus, name: &str) -> String {
+    std::fs::read_to_string(dir(c).join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
-fn certificate_der(name: &str) -> Vec<u8> {
-    let blocks = pem::decode_all(&read(name)).unwrap();
+fn certificate_der(c: &Corpus, name: &str) -> Vec<u8> {
+    let blocks = pem::decode_all(&read(c, name)).unwrap();
     // The Go tool writes a `MTC CERTIFICATE PROPERTIES` block first.
     blocks
         .into_iter()
@@ -49,12 +68,12 @@ fn certificate_der(name: &str) -> Vec<u8> {
         .der
 }
 
-fn ca() -> CaCertificate {
-    CaCertificate::from_der(&certificate_der("ca_cert.pem")).unwrap()
+fn ca(c: &Corpus) -> CaCertificate {
+    CaCertificate::from_der(&certificate_der(c, "ca_cert.pem")).unwrap()
 }
 
 /// The Go tool's `policy.txt` vocabulary, as `interop verify` reads it.
-fn relying_party(ca: &CaCertificate) -> RelyingPartyConfig {
+fn relying_party(c: &Corpus, ca: &CaCertificate) -> RelyingPartyConfig {
     let (set, entry) = ca.ml_dsa_cosigner_entry().unwrap();
     assert_eq!(set, MlDsaParameterSet::MlDsa44);
     let mut rp = RelyingPartyConfig {
@@ -65,7 +84,7 @@ fn relying_party(ca: &CaCertificate) -> RelyingPartyConfig {
         revoked_ranges: vec![],
     };
     let mut ignored = Vec::new();
-    for line in read("policy.txt").lines() {
+    for line in read(c, "policy.txt").lines() {
         let f: Vec<&str> = line.split_whitespace().collect();
         match f.as_slice() {
             ["cosigner", id, alg, b64] if alg.starts_with("mldsa") => {
@@ -94,7 +113,13 @@ fn relying_party(ca: &CaCertificate) -> RelyingPartyConfig {
 
 #[test]
 fn the_ca_certificate_of_the_go_tool_is_read_and_its_key_is_the_documented_seed() {
-    let ca = ca();
+    for c in &CORPORA {
+        the_ca_certificate_of_the_go_tool_is_read_and_its_key_is_the_documented_seed_in(c);
+    }
+}
+
+fn the_ca_certificate_of_the_go_tool_is_read_and_its_key_is_the_documented_seed_in(c: &Corpus) {
+    let ca = ca(c);
     assert_eq!(ca.ca_id, TrustAnchorId::from_ascii("32473.1").unwrap());
     assert_eq!(ca.min_serial, 1 << 48);
     assert_eq!(ca.max_serial, (5 << 48) | ((1 << 48) - 1));
@@ -122,12 +147,18 @@ fn the_ca_certificate_of_the_go_tool_is_read_and_its_key_is_the_documented_seed(
 
 #[test]
 fn every_verdict_of_the_go_verifier_is_reproduced() {
-    let ca = ca();
-    let rp = relying_party(&ca);
+    for c in &CORPORA {
+        every_verdict_of_the_go_verifier_is_reproduced_in(c);
+    }
+}
+
+fn every_verdict_of_the_go_verifier_is_reproduced_in(c: &Corpus) {
+    let ca = ca(c);
+    let rp = relying_party(c, &ca);
     let mut checked = 0;
-    for line in read("expected.txt").lines() {
+    for line in read(c, "expected.txt").lines() {
         let (name, expected) = line.split_once(' ').unwrap();
-        let result = verify_certificate(&certificate_der(name), &rp, NOW);
+        let result = verify_certificate(&certificate_der(c, name), &rp, NOW);
         let got = if result.is_ok() { "OK" } else { "FAIL" };
         assert_eq!(got, expected, "{name}: {result:?}");
         if let Ok(v) = &result {
@@ -136,6 +167,7 @@ fn every_verdict_of_the_go_verifier_is_reproduced() {
                 "{name}: serial outside the CA's range"
             );
             assert_eq!(v.log_number, 1);
+            assert_eq!(v.oids, c.oids, "{name}: written with another OID set");
         }
         checked += 1;
     }
@@ -144,9 +176,15 @@ fn every_verdict_of_the_go_verifier_is_reproduced() {
 
 #[test]
 fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for() {
-    let ca = ca();
-    let rp = relying_party(&ca);
-    let verdict = |name: &str| verify_certificate(&certificate_der(name), &rp, NOW);
+    for c in &CORPORA {
+        the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for_in(c);
+    }
+}
+
+fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for_in(c: &Corpus) {
+    let ca = ca(c);
+    let rp = relying_party(c, &ca);
+    let verdict = |name: &str| verify_certificate(&certificate_der(c, name), &rp, NOW);
     // `UnusedBit`: the signature BIT STRING declares one unused bit.
     assert_eq!(
         verdict("cert_10_1.pem"),
@@ -184,11 +222,11 @@ fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for() {
     }
     // Requiring the ML-DSA-87 witness as well is satisfied by cert_10_11
     // (CA + 32473.2.3) and not by cert_10_3 (CA only).
-    let mut strict = relying_party(&ca);
+    let mut strict = relying_party(c, &ca);
     strict.required_cosigners = vec![TrustAnchorId::from_ascii("32473.2.3").unwrap()];
-    assert!(verify_certificate(&certificate_der("cert_10_11.pem"), &strict, NOW).is_ok());
+    assert!(verify_certificate(&certificate_der(c, "cert_10_11.pem"), &strict, NOW).is_ok());
     assert_eq!(
-        verify_certificate(&certificate_der("cert_10_3.pem"), &strict, NOW),
+        verify_certificate(&certificate_der(c, "cert_10_3.pem"), &strict, NOW),
         Err(VerifyError::MissingCosignature(
             TrustAnchorId::from_ascii("32473.2.3").unwrap()
         ))
@@ -197,8 +235,8 @@ fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for() {
 
 /// The Go tool's entry tiles: `uint16`-length-prefixed entries, 256 per
 /// tile, at `tile/entries/NNN` (full) or `tile/entries/NNN.p/<width>`.
-fn entries_from_tiles() -> Vec<Vec<u8>> {
-    let base = dir().join("tile").join("entries");
+fn entries_from_tiles(c: &Corpus) -> Vec<Vec<u8>> {
+    let base = dir(c).join("tile").join("entries");
     let mut entries = Vec::new();
     for i in 0.. {
         let full = base.join(format!("{i:03}"));
@@ -233,8 +271,14 @@ fn entries_from_tiles() -> Vec<Vec<u8>> {
 
 #[test]
 fn the_go_tools_checkpoint_is_reproduced_from_its_entry_tiles() {
-    let ca = ca();
-    let note = read("checkpoint");
+    for c in &CORPORA {
+        the_go_tools_checkpoint_is_reproduced_from_its_entry_tiles_in(c);
+    }
+}
+
+fn the_go_tools_checkpoint_is_reproduced_from_its_entry_tiles_in(c: &Corpus) {
+    let ca = ca(c);
+    let note = read(c, "checkpoint");
     let lines: Vec<&str> = note.lines().collect();
     let log_id = ca.ca_id.log_id(1).unwrap();
     assert_eq!(lines[0], log_id.oid_name().unwrap());
@@ -242,7 +286,7 @@ fn the_go_tools_checkpoint_is_reproduced_from_its_entry_tiles() {
     let root = pem::base64_decode(lines[2]).unwrap();
     assert_eq!(lines[3], "");
 
-    let entries = entries_from_tiles();
+    let entries = entries_from_tiles(c);
     assert_eq!(entries.len() as u64, size);
     assert_eq!(size, 2122);
     let log = IssuanceLog::from_entries(1, entries).unwrap();

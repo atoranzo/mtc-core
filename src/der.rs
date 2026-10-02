@@ -11,33 +11,106 @@
 //!
 //! What does live here, because it is a **format decision of the draft**
 //! and must have a single definition: the distinguished name of a CA ID
-//! (`RELATIVE-OID` under the experimental attribute), the OIDs of the
-//! `1.3.6.1.4.1.44363.47` arc and the `AlgorithmIdentifier` of `id-alg-mtcProof`.
+//! (`RELATIVE-OID` under the trust anchor ID attribute), the three OIDs the
+//! draft assigns, in each of the sets that have been on the wire, and the
+//! `AlgorithmIdentifier` of `id-alg-mtcProof`.
 
 use crate::tai::TrustAnchorId;
 
-/// The experimental arc the draft reserves (donated by Cloudflare).
+/// The experimental arc the draft reserved before IANA assigned OIDs
+/// (donated by Cloudflare).
 pub const ARC_MTC_EXPERIMENTAL: [u64; 8] = [1, 3, 6, 1, 4, 1, 44363, 47];
 
-/// `id-rdna-trustAnchorID`, in its experimental OID `…47.3`.
-pub fn oid_rdna_trust_anchor_id() -> Vec<u64> {
-    let mut v = ARC_MTC_EXPERIMENTAL.to_vec();
-    v.push(3);
-    v
+/// **The three OIDs an implementation uses together**: `id-alg-mtcProof`
+/// (the certificate's signature algorithm), `id-rdna-trustAnchorID` (the
+/// attribute of the CA ID's distinguished name, in every issuer and in the
+/// CA certificate's subject) and `id-pe-mtcCertificationAuthority-SHA256`
+/// (the CA certificate's extension).
+///
+/// Three sets have been on the wire, and the draft repository's
+/// `draft_oids.md` and its `demo/` are the record of each:
+/// [`OIDS_IANA`], assigned in September 2026 and in the working copy since
+/// the commit "We have PKIX OIDs!"; [`OIDS_EXPERIMENTAL_06`], `plants-06`;
+/// and [`OIDS_EXPERIMENTAL_47_5`], the interim one the working copy used
+/// between them, which is the set of the corpus of AUDIT.md §14.
+///
+/// A CA emits one set ([`crate::CaConfig::oids`]). A relying party accepts
+/// the [`KNOWN_OID_SETS`], **one set per certificate**: the issuer's
+/// attribute must belong to the set its signature algorithm names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OidSet {
+    pub name: &'static str,
+    pub mtc_proof: &'static [u64],
+    pub rdna_trust_anchor_id: &'static [u64],
+    pub mtc_ca_sha256: &'static [u64],
 }
 
-/// `id-pe-mtcCertificationAuthority-SHA256`, experimental `…47.4`.
-pub fn oid_pe_mtc_ca_sha256() -> Vec<u64> {
-    let mut v = ARC_MTC_EXPERIMENTAL.to_vec();
-    v.push(4);
-    v
-}
+/// The IANA-assigned OIDs (PKIX arc): `id-alg-mtcProof` = `1.3.6.1.5.5.7.6.67`,
+/// `id-rdna-trustAnchorID` = `1.3.6.1.5.5.7.25.3`,
+/// `id-pe-mtcCertificationAuthority-SHA256` = `1.3.6.1.5.5.7.1.38`.
+pub const OIDS_IANA: OidSet = OidSet {
+    name: "IANA",
+    mtc_proof: &[1, 3, 6, 1, 5, 5, 7, 6, 67],
+    rdna_trust_anchor_id: &[1, 3, 6, 1, 5, 5, 7, 25, 3],
+    mtc_ca_sha256: &[1, 3, 6, 1, 5, 5, 7, 1, 38],
+};
 
-/// `id-alg-mtcProof`, experimental `…47.5`.
-pub fn oid_alg_mtc_proof() -> Vec<u64> {
-    let mut v = ARC_MTC_EXPERIMENTAL.to_vec();
-    v.push(5);
-    v
+/// The experimental set of `plants-06`: `…47.0`, `…47.3`, `…47.4`.
+pub const OIDS_EXPERIMENTAL_06: OidSet = OidSet {
+    name: "experimental (plants-06: 47.0, 47.3, 47.4)",
+    mtc_proof: &[1, 3, 6, 1, 4, 1, 44363, 47, 0],
+    rdna_trust_anchor_id: &[1, 3, 6, 1, 4, 1, 44363, 47, 3],
+    mtc_ca_sha256: &[1, 3, 6, 1, 4, 1, 44363, 47, 4],
+};
+
+/// The interim experimental set: `…47.5`, `…47.3`, `…47.4`. `draft_oids.md`
+/// lists `…47.5` as "starting draft plants-07"; the reference tool emitted it
+/// for `-version plants-07` until the IANA assignment replaced it.
+pub const OIDS_EXPERIMENTAL_47_5: OidSet = OidSet {
+    name: "experimental (interim: 47.5, 47.3, 47.4)",
+    mtc_proof: &[1, 3, 6, 1, 4, 1, 44363, 47, 5],
+    rdna_trust_anchor_id: &[1, 3, 6, 1, 4, 1, 44363, 47, 3],
+    mtc_ca_sha256: &[1, 3, 6, 1, 4, 1, 44363, 47, 4],
+};
+
+/// The sets a relying party accepts, in this order. Each has its own
+/// `id-alg-mtcProof`, so a certificate's signature algorithm names its set.
+pub const KNOWN_OID_SETS: [OidSet; 3] = [OIDS_IANA, OIDS_EXPERIMENTAL_47_5, OIDS_EXPERIMENTAL_06];
+
+impl OidSet {
+    /// The set whose `id-alg-mtcProof` `AlgorithmIdentifier` is exactly
+    /// these bytes (the OID with absent parameters), if any.
+    pub fn from_mtc_proof_alg(alg_id: &[u8]) -> Option<OidSet> {
+        KNOWN_OID_SETS
+            .into_iter()
+            .find(|s| algorithm_identifier(s.mtc_proof) == alg_id)
+    }
+
+    /// The set a CA certificate's extension names. The two experimental sets
+    /// share the extension and the name attribute, so a CA certificate cannot
+    /// tell them apart; it reads as [`OIDS_EXPERIMENTAL_06`], where both were
+    /// defined, and only its `mtc_ca_sha256` and `rdna_trust_anchor_id` are
+    /// meaningful.
+    pub fn from_mtc_ca_extension(arcs: &[u64]) -> Option<OidSet> {
+        if arcs == OIDS_IANA.mtc_ca_sha256 {
+            Some(OIDS_IANA)
+        } else if arcs == OIDS_EXPERIMENTAL_06.mtc_ca_sha256 {
+            Some(OIDS_EXPERIMENTAL_06)
+        } else {
+            None
+        }
+    }
+
+    /// Parse a name for `-oids` on a command line: `iana`, `experimental-06`
+    /// or `experimental-47.5`.
+    pub fn from_flag(s: &str) -> Option<OidSet> {
+        match s {
+            "iana" => Some(OIDS_IANA),
+            "experimental-06" => Some(OIDS_EXPERIMENTAL_06),
+            "experimental-47.5" => Some(OIDS_EXPERIMENTAL_47_5),
+            _ => None,
+        }
+    }
 }
 
 /// `id-ce-subjectAltName`.
@@ -252,9 +325,9 @@ pub fn algorithm_identifier(arcs: &[u64]) -> Vec<u8> {
     sequence(&oid(arcs))
 }
 
-/// The `AlgorithmIdentifier` of `id-alg-mtcProof`, without parameters.
-pub fn alg_id_mtc_proof() -> Vec<u8> {
-    algorithm_identifier(&oid_alg_mtc_proof())
+/// The `AlgorithmIdentifier` of `id-alg-mtcProof` in a set, without parameters.
+pub fn alg_id_mtc_proof(oids: &OidSet) -> Vec<u8> {
+    algorithm_identifier(oids.mtc_proof)
 }
 
 // ───────────────────────── time ─────────────────────────
@@ -427,14 +500,15 @@ pub fn expect_tlv(input: &[u8], tag: u8) -> Result<(Tlv<'_>, &[u8]), DerError> {
 /// attribute whose value is the identifier's `RELATIVE-OID`. It goes as the
 /// `issuer` of every entry and every certificate, and as the `subject` of
 /// the CA's certificate.
-pub fn name_from_ca_id(ca_id: &TrustAnchorId) -> Vec<u8> {
-    let mut attr = oid(&oid_rdna_trust_anchor_id());
+pub fn name_from_ca_id(ca_id: &TrustAnchorId, oids: &OidSet) -> Vec<u8> {
+    let mut attr = oid(oids.rdna_trust_anchor_id);
     attr.extend(relative_oid(&ca_id.to_binary()));
     sequence(&set(&sequence(&attr)))
 }
 
-/// Reads the CA ID from a `Name` composed by [`name_from_ca_id`].
-pub fn ca_id_from_name(name: &[u8]) -> Result<TrustAnchorId, DerError> {
+/// Reads the CA ID from a `Name` composed by [`name_from_ca_id`] with the
+/// attribute of `oids`, and with no other.
+pub fn ca_id_from_name(name: &[u8], oids: &OidSet) -> Result<TrustAnchorId, DerError> {
     let (seq, rest) = expect_tlv(name, TAG_SEQUENCE)?;
     if !rest.is_empty() {
         return Err(DerError::TrailingData);
@@ -448,7 +522,7 @@ pub fn ca_id_from_name(name: &[u8]) -> Result<TrustAnchorId, DerError> {
         return Err(DerError::NotACaIdName);
     }
     let (typ, rest) = expect_tlv(attr.content, TAG_OID)?;
-    if typ.content != oid_content(&oid_rdna_trust_anchor_id()) {
+    if typ.content != oid_content(oids.rdna_trust_anchor_id) {
         return Err(DerError::NotACaIdName);
     }
     let (val, rest) = expect_tlv(rest, TAG_RELATIVE_OID)?;
@@ -584,15 +658,59 @@ mod tests {
 
     #[test]
     fn ca_id_name_matches_the_example_of_the_draft() {
-        // "1.3.6.1.4.1.44363.47.3=#0d0481fd5901" for the CA ID 32473.1.
+        // The working copy's example, with the IANA attribute:
+        // "1.3.6.1.5.5.7.25.3=#0d0481fd5901" for the CA ID 32473.1.
         let ca = TrustAnchorId::new(vec![32473, 1]).unwrap();
-        let name = name_from_ca_id(&ca);
+        let name = name_from_ca_id(&ca, &OIDS_IANA);
         assert!(hex(&name).ends_with("0d0481fd5901"));
         assert_eq!(
-            hex(&oid(&oid_rdna_trust_anchor_id())),
+            hex(&oid(OIDS_IANA.rdna_trust_anchor_id)),
+            "06082b06010505071903"
+        );
+        assert_eq!(ca_id_from_name(&name, &OIDS_IANA).unwrap(), ca);
+        // The experimental attribute, as before the IANA assignment.
+        let old = name_from_ca_id(&ca, &OIDS_EXPERIMENTAL_06);
+        assert_eq!(
+            hex(&oid(OIDS_EXPERIMENTAL_06.rdna_trust_anchor_id)),
             "060a2b0601040182da4b2f03"
         );
-        assert_eq!(ca_id_from_name(&name).unwrap(), ca);
+        assert_eq!(ca_id_from_name(&old, &OIDS_EXPERIMENTAL_47_5).unwrap(), ca);
+        // One set per name: the attribute of another set is not a CA ID.
+        assert_eq!(
+            ca_id_from_name(&old, &OIDS_IANA),
+            Err(DerError::NotACaIdName)
+        );
+        assert_eq!(
+            ca_id_from_name(&name, &OIDS_EXPERIMENTAL_06),
+            Err(DerError::NotACaIdName)
+        );
+    }
+
+    #[test]
+    fn each_known_set_is_named_by_its_proof_oid_and_the_iana_arcs_are_the_assigned_ones() {
+        // DER of the three IANA OIDs (PKIX arc 1.3.6.1.5.5.7).
+        assert_eq!(hex(&oid(OIDS_IANA.mtc_proof)), "06082b06010505070643");
+        assert_eq!(hex(&oid(OIDS_IANA.mtc_ca_sha256)), "06082b06010505070126");
+        for s in KNOWN_OID_SETS {
+            assert_eq!(OidSet::from_mtc_proof_alg(&alg_id_mtc_proof(&s)), Some(s));
+        }
+        // A parameter (NULL) makes it another AlgorithmIdentifier.
+        let mut with_null = oid(OIDS_IANA.mtc_proof);
+        with_null.extend([0x05, 0x00]);
+        assert_eq!(OidSet::from_mtc_proof_alg(&sequence(&with_null)), None);
+        assert_eq!(
+            OidSet::from_mtc_ca_extension(OIDS_IANA.mtc_ca_sha256),
+            Some(OIDS_IANA)
+        );
+        assert_eq!(
+            OidSet::from_mtc_ca_extension(OIDS_EXPERIMENTAL_47_5.mtc_ca_sha256),
+            Some(OIDS_EXPERIMENTAL_06)
+        );
+        assert_eq!(
+            OidSet::from_flag("experimental-47.5"),
+            Some(OIDS_EXPERIMENTAL_47_5)
+        );
+        assert_eq!(OidSet::from_flag("47.5"), None);
     }
 
     #[test]

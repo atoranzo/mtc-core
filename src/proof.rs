@@ -177,34 +177,39 @@ impl MtcProof {
     }
 }
 
-/// An MTC certificate: its `TBSCertificate` in DER and its proof.
+/// An MTC certificate: its `TBSCertificate` in DER, its proof, and the OID
+/// set it is written with (its `id-alg-mtcProof` names it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MtcCertificate {
     pub tbs_certificate: Vec<u8>,
     pub proof: MtcProof,
+    pub oids: der::OidSet,
 }
 
 impl MtcCertificate {
     /// `Certificate { tbsCertificate, id-alg-mtcProof, BIT STRING(MTCProof) }`.
     pub fn to_der(&self) -> Result<Vec<u8>, ProofError> {
         let mut c = self.tbs_certificate.clone();
-        c.extend(der::alg_id_mtc_proof());
+        c.extend(der::alg_id_mtc_proof(&self.oids));
         c.extend(der::bit_string(&self.proof.encode()?));
         Ok(der::sequence(&c))
     }
 
     pub fn from_der(cert: &[u8]) -> Result<Self, ProofError> {
         let parts = der::parse_certificate(cert)?;
-        if parts.signature_algorithm.raw != der::alg_id_mtc_proof().as_slice() {
-            return Err(ProofError::NotAnMtcCertificate);
-        }
+        // The outer algorithm names the OID set, and the TBS repeats it: the
+        // same `id-alg-mtcProof`, byte for byte, or it is not an MTC
+        // certificate of any known set.
+        let oids = der::OidSet::from_mtc_proof_alg(parts.signature_algorithm.raw)
+            .ok_or(ProofError::NotAnMtcCertificate)?;
         let fields = der::parse_tbs(parts.tbs.raw)?;
-        if fields.signature.raw != der::alg_id_mtc_proof().as_slice() {
+        if fields.signature.raw != parts.signature_algorithm.raw {
             return Err(ProofError::NotAnMtcCertificate);
         }
         Ok(MtcCertificate {
             tbs_certificate: parts.tbs.raw.to_vec(),
             proof: MtcProof::decode(parts.signature_value)?,
+            oids,
         })
     }
 

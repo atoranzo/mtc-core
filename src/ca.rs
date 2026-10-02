@@ -54,6 +54,10 @@ pub struct CaConfig {
     /// Maximum lifetime of a certificate, in seconds: it bounds the validity
     /// that is accepted and fixes the expiry of each landmark.
     pub max_cert_lifetime: u64,
+    /// The OIDs this CA writes: [`der::OIDS_IANA`] unless a relying party
+    /// that predates the IANA assignment has to read it. It goes into the
+    /// issuer of every entry, so it is fixed for the life of the log.
+    pub oids: der::OidSet,
 }
 
 /// A request **already validated** by the layer above.
@@ -283,7 +287,7 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         }
         let leaf = MtcLeaf {
             version: 2,
-            issuer: der::name_from_ca_id(&self.cfg.ca_id),
+            issuer: der::name_from_ca_id(&self.cfg.ca_id, &self.cfg.oids),
             validity: v,
             subject: req.subject,
             spki: req.spki,
@@ -366,7 +370,8 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         )?;
         let serial = ((self.cfg.log_number as u64) << 48) | index;
         Ok(MtcCertificate {
-            tbs_certificate: leaf.tbs_certificate(serial)?,
+            tbs_certificate: leaf.tbs_certificate(serial, &self.cfg.oids)?,
+            oids: self.cfg.oids,
             proof: MtcProof {
                 extensions: entry.extensions().to_vec(),
                 subtree,

@@ -71,6 +71,8 @@ pub struct VerifiedCertificate {
     pub entry_hash: HashValue,
     pub validity: Validity,
     pub basis: Basis,
+    /// The OID set the certificate is written with.
+    pub oids: der::OidSet,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,7 +142,10 @@ pub fn verify_certificate(
         return Err(VerifyError::LogNumberZero);
     }
     let log_number = log_number as u16;
-    let issuer = der::ca_id_from_name(fields.issuer.raw).map_err(|_| VerifyError::UnknownIssuer)?;
+    // The issuer's attribute must belong to the set the signature algorithm
+    // names: one set per certificate.
+    let issuer = der::ca_id_from_name(fields.issuer.raw, &cert.oids)
+        .map_err(|_| VerifyError::UnknownIssuer)?;
     if issuer != cfg.ca_id {
         return Err(VerifyError::UnknownIssuer);
     }
@@ -223,5 +228,6 @@ pub fn verify_certificate(
         entry_hash,
         validity,
         basis,
+        oids: cert.oids,
     })
 }

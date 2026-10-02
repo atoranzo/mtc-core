@@ -96,6 +96,10 @@ pub struct CaCertificate {
     pub min_serial: u64,
     pub max_serial: u64,
     pub validity: Validity,
+    /// The OIDs of the extension and of the subject's attribute. On read,
+    /// the two experimental sets are indistinguishable here and read as
+    /// [`der::OIDS_EXPERIMENTAL_06`] (see [`der::OidSet::from_mtc_ca_extension`]).
+    pub oids: der::OidSet,
 }
 
 fn extension(oid: &[u64], critical: bool, value: &[u8]) -> Vec<u8> {
@@ -146,7 +150,7 @@ impl CaCertificate {
         let mut exts = extension(&OID_KEY_USAGE, true, &key_usage);
         exts.extend(extension(&OID_BASIC_CONSTRAINTS, true, &basic_constraints));
         exts.extend(extension(
-            &der::oid_pe_mtc_ca_sha256(),
+            self.oids.mtc_ca_sha256,
             true,
             &self.extension_value()?,
         ));
@@ -156,7 +160,7 @@ impl CaCertificate {
         tbs.extend(der::algorithm_identifier(&OID_ALG_UNSIGNED));
         tbs.extend(issuer);
         tbs.extend(self.validity.to_der());
-        tbs.extend(der::name_from_ca_id(&self.ca_id));
+        tbs.extend(der::name_from_ca_id(&self.ca_id, &self.oids));
         tbs.extend_from_slice(&self.spki);
         tbs.extend(der::explicit(3, &der::sequence(&exts)));
 
@@ -172,8 +176,6 @@ impl CaCertificate {
     pub fn from_der(cert: &[u8]) -> Result<Self, CaCertError> {
         let parts = der::parse_certificate(cert)?;
         let fields = der::parse_tbs(parts.tbs.raw)?;
-        let ca_id = der::ca_id_from_name(fields.subject.raw)?;
-        ca_id.check_as_ca_id()?;
         let validity = Validity::from_der(&fields.validity)?;
         spki::parse(fields.spki.raw)?;
 
@@ -194,7 +196,7 @@ impl CaCertificate {
         }
 
         let mut cur = seq.content;
-        let mut mtc: Option<(bool, &[u8])> = None;
+        let mut mtc: Option<(der::OidSet, bool, &[u8])> = None;
         let mut key_usage: Option<&[u8]> = None;
         let mut basic_constraints: Option<&[u8]> = None;
         while !cur.is_empty() {
@@ -210,8 +212,10 @@ impl CaCertificate {
                 return Err(CaCertError::Malformed("extension"));
             }
             let arcs = spki::oid_arcs(oid.content)?;
-            let slot = if arcs == der::oid_pe_mtc_ca_sha256() {
-                if mtc.replace((critical, value.content)).is_some() {
+            let slot = if let Some(set) = der::OidSet::from_mtc_ca_extension(&arcs) {
+                // One MTC CA extension, of whichever set: two (the IANA one
+                // and an experimental one) would be two answers to one question.
+                if mtc.replace((set, critical, value.content)).is_some() {
                     return Err(CaCertError::DuplicateExtension("mtcCertificationAuthority"));
                 }
                 continue;
@@ -256,11 +260,14 @@ impl CaCertificate {
         }
 
         // The MTC CA extension, critical.
-        let (critical, value) =
+        let (oids, critical, value) =
             mtc.ok_or(CaCertError::MissingExtension("mtcCertificationAuthority"))?;
         if !critical {
             return Err(CaCertError::NotCritical);
         }
+        // The subject is the CA ID under the attribute of the extension's set.
+        let ca_id = der::ca_id_from_name(fields.subject.raw, &oids)?;
+        ca_id.check_as_ca_id()?;
         let (v, rest) = der::expect_tlv(value, der::TAG_SEQUENCE)?;
         if !rest.is_empty() {
             return Err(CaCertError::Malformed("mtcCertificationAuthority"));
@@ -278,6 +285,7 @@ impl CaCertificate {
             min_serial: der::decode_integer_u64(min.content)?,
             max_serial: der::decode_integer_u64(max.content)?,
             validity,
+            oids,
         };
         ca.check_serials()?;
         Ok(ca)
@@ -380,6 +388,7 @@ mod tests {
                 not_before: 1_577_836_800, // 2020-01-01
                 not_after: 1_924_991_999,  // 2030-12-31T23:59:59
             },
+            oids: der::OIDS_IANA,
         }
     }
 
@@ -400,6 +409,32 @@ mod tests {
     }
 
     #[test]
+    fn the_experimental_set_round_trips_and_a_mixed_one_is_refused() {
+        let mut ca = sample();
+        ca.oids = der::OIDS_EXPERIMENTAL_06;
+        let der_exp = ca.to_der().unwrap();
+        assert_eq!(CaCertificate::from_der(&der_exp).unwrap(), ca);
+        // The interim set writes the same two OIDs, and reads as plants-06.
+        ca.oids = der::OIDS_EXPERIMENTAL_47_5;
+        assert_eq!(ca.to_der().unwrap(), der_exp);
+        // The IANA extension over an experimental subject: not a CA ID name
+        // under the extension's set.
+        let iana = sample().to_der().unwrap();
+        let exp_name = der::name_from_ca_id(&sample().ca_id, &der::OIDS_EXPERIMENTAL_06);
+        let iana_name = der::name_from_ca_id(&sample().ca_id, &der::OIDS_IANA);
+        let pos = iana
+            .windows(iana_name.len())
+            .rposition(|w| w == &iana_name[..])
+            .unwrap();
+        let mut mixed = iana[..pos].to_vec();
+        mixed.extend(&exp_name);
+        mixed.extend(&iana[pos + iana_name.len()..]);
+        // Lengths differ by two bytes; re-wrap is not needed for the parser to
+        // reject it, because the outer lengths no longer match either.
+        assert!(CaCertificate::from_der(&mixed).is_err());
+    }
+
+    #[test]
     fn serial_range_is_enforced_both_ways() {
         let mut ca = sample();
         ca.min_serial = 5;
@@ -415,7 +450,7 @@ mod tests {
         let der = ca.to_der().unwrap();
         // Flip the criticality of the MTC extension: the BOOLEAN 0xff that
         // follows its OID.
-        let oid = der::oid(&der::oid_pe_mtc_ca_sha256());
+        let oid = der::oid(ca.oids.mtc_ca_sha256);
         let pos = der.windows(oid.len()).position(|w| w == &oid[..]).unwrap();
         let mut not_critical = der.clone();
         not_critical[pos + oid.len() + 2] = 0x00;

@@ -4,7 +4,8 @@ The natural interoperability target of this crate is `demo/` in the PLANTS
 working group's repository, <https://github.com/ietf-plants-wg/merkle-tree-certs>:
 a generator and a verifier in Go for the current design. This directory
 holds the procedure; `AUDIT.md` holds the record of each run, and
-`tests/vectors/interop-plants-07/` holds the Go tool's corpus with its
+`tests/vectors/interop-iana/` (and, for the interim OIDs of §14,
+`tests/vectors/interop-plants-07/`) holds the Go tool's corpus with its
 verdicts so that one direction runs offline in `cargo test`.
 
 ## What is measured
@@ -30,13 +31,17 @@ Three things, each with negatives:
 ## Versions
 
 The tool's `-version` flag takes names such as `plants-06` or `plants-07`.
-This crate encodes `id-alg-mtcProof` as `1.3.6.1.4.1.44363.47.5`, which the
-draft repository's `draft_oids.md` assigns "starting draft plants-07"
-(`plants-06` used `…47.0`; in the demo that OID is the only difference
-between the two). So every command below says `-version plants-07`, and the
-generator's configuration says `"Version": "plants-07"`. With the default
-`plants-06` the Go verifier rejects every certificate from here with
-"signature algorithm was not an mtcProof", by design.
+Since the draft repository's commit `ad4256b` ("We have PKIX OIDs!",
+2026-09-29), `plants-07` writes and reads the IANA-assigned OIDs
+(`id-alg-mtcProof` `1.3.6.1.5.5.7.6.67`, `id-rdna-trustAnchorID`
+`1.3.6.1.5.5.7.25.3`, `id-pe-mtcCertificationAuthority-SHA256`
+`1.3.6.1.5.5.7.1.38`), which is what this crate's CA writes by default. So
+every command below says `-version plants-07`, the generator's configuration
+says `"Version": "plants-07"`, and the demo has to be at `ad4256b` or later.
+Before it, the same version string meant the interim experimental set
+(`…44363.47.5`, `.47.3`, `.47.4`): to measure against such a demo, run
+`interop generate -oids experimental-47.5`. With `plants-06` the Go verifier
+rejects every certificate from here by design: its OIDs are another set.
 
 ## Requirements
 
@@ -68,7 +73,7 @@ cargo build --release --example interop
 INTEROP=target/release/examples/interop
 
 # 1. Go → Rust.
-$DEMO_DIR/demo generate -config tests/vectors/interop-plants-07/mtc.json -out go > go-generate.log
+$DEMO_DIR/demo generate -config tests/vectors/interop-iana/mtc.json -out go > go-generate.log
 { grep '^cosigner ' $DEMO_DIR/policy.txt
   grep 'Landmark subtree' go-generate.log |
     sed -E 's/.*\[([0-9]+), ([0-9]+)\) with hash (.*)/trusted-subtree 32473.1 1 \1 \2 \3/'; } > go/policy.txt

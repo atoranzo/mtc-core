@@ -148,7 +148,7 @@ so row by row.
 | 2026-02-18 | Adoption: `draft-ietf-plants-merkle-tree-certs-00` | git tag | confirmed |
 | 2026-02-27 | Google Security Blog, "Cultivating a robust and efficient quantum-safe HTTPS": MTC *bootstrapping* in the first quarter of 2027 and the *Chrome Quantum-resistant Root Store* in the third; no post-quantum X.509 in Chrome's root store | security.googleblog.com | confirmed |
 | 2026-06-03 | Let's Encrypt, "A Post-Quantum Future for Let's Encrypt": MTC in *staging* at the end of 2026, production in 2027 | letsencrypt.org | confirmed |
-| 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`; this crate is written against the working repository as of 2026-09-29, whose OIDs (`…47.5` for `id-alg-mtcProof`) are the ones its `draft_oids.md` assigns "starting draft plants-07": the reference tool's `-version plants-07` | git tag | confirmed |
+| 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`; this crate is written against the working repository as of 2026-09-29; first with its interim experimental OIDs (`…47.5` for `id-alg-mtcProof`), and since AUDIT.md §18 with the IANA-assigned ones the working copy adopted that day (`1.3.6.1.5.5.7.6.67`, `.25.3`, `.1.38`), which are what the reference tool's `-version plants-07` writes now | git tag | confirmed |
 | 2026-09-29 | Cloudflare announces its public CA and "Building a post-quantum certificate authority with Merkle Tree Certificates": experiment with 50 % of Chrome Beta 146, first MTCs in the first quarter of 2027 | blog.cloudflare.com | confirmed (day from snippets) |
 | 2026-09-29 | Spanish press coverage of the Cloudflare announcement; the 20minutos headline matches that hook | infobae.com (same day) | unverified |
 
@@ -538,9 +538,10 @@ per version, one ledger entry per change) and none of the STARK code.
 ## 7. What this skeleton does not claim
 
 - **It is not audited.** Neither this code, nor `ml-dsa` (its own crate says
-  so), nor `hbs-state`. The OIDs are the experimental ones from the
-  `1.3.6.1.4.1.44363.47` arc the draft reserves for that, and the draft may
-  change: the version read is the PLANTS working group's working repository as
+  so), nor `hbs-state`. The OIDs are the IANA-assigned ones by default
+  (`CaConfig::oids`), and a relying party here also accepts the two
+  experimental sets of the `1.3.6.1.4.1.44363.47` arc that have been on the
+  wire (AUDIT.md §18); the draft may still change: the version read is the PLANTS working group's working repository as
   of September 29, 2026. It did pass an internal adversarial review (six
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is
@@ -554,7 +555,9 @@ per version, one ledger entry per change) and none of the STARK code.
   rewrite of Cloudflare's Go CA and mirror for `-06`
   (`github.com/bob-beck/cloudflare-mtc`), announced on the working group's list
   with an end-to-end demonstration; neither is measured here yet (AUDIT.md
-  §17). Cloudflare's own `bwesterb/mtc` still follows the earlier batch
+  §17). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
+  since `ad4256b`, and the measurement was repeated against it at `38014f7`,
+  with the same verdicts (§18). Cloudflare's own `bwesterb/mtc` still follows the earlier batch
   design. Against `demo/`, in both directions
   and with negatives, everything measured agrees: its 26 verdicts are
   reproduced here (`tests/interop_corpus.rs`, offline), its log of 2122

@@ -214,8 +214,8 @@ mod tests {
             OID_ED25519
         );
         assert_eq!(
-            oid_arcs(&der::oid_content(&der::oid_alg_mtc_proof())).unwrap(),
-            der::oid_alg_mtc_proof()
+            oid_arcs(&der::oid_content(der::OIDS_IANA.mtc_proof)).unwrap(),
+            der::OIDS_IANA.mtc_proof
         );
     }
 }

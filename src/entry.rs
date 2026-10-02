@@ -327,11 +327,12 @@ impl MtcLeaf {
     }
 
     /// The X.509 `TBSCertificate` with `serialNumber = (log << 48) | index` and
-    /// `signature = id-alg-mtcProof`.
-    pub fn tbs_certificate(&self, serial: u64) -> Result<Vec<u8>, EntryError> {
+    /// `signature = id-alg-mtcProof` of `oids`, which must be the set whose
+    /// attribute is in `issuer`.
+    pub fn tbs_certificate(&self, serial: u64, oids: &der::OidSet) -> Result<Vec<u8>, EntryError> {
         let mut c = self.version_der();
         c.extend(der::integer_u64(serial));
-        c.extend(der::alg_id_mtc_proof());
+        c.extend(der::alg_id_mtc_proof(oids));
         c.extend_from_slice(&self.issuer);
         c.extend(self.validity.to_der());
         c.extend_from_slice(&self.subject);
@@ -379,7 +380,7 @@ pub(crate) mod fixtures {
     pub fn leaf(ca: &TrustAnchorId, dns: &str, key: &[u8]) -> MtcLeaf {
         MtcLeaf {
             version: 2,
-            issuer: der::name_from_ca_id(ca),
+            issuer: der::name_from_ca_id(ca, &der::OIDS_IANA),
             validity: Validity {
                 not_before: 1_800_000_000,
                 not_after: 1_800_000_000 + 7 * 86_400,
@@ -411,7 +412,9 @@ mod tests {
             .err(),
             Some(EntryError::UnknownExtension(9))
         );
-        let tbs = leaf.tbs_certificate((1u64 << 48) | 5).unwrap();
+        let tbs = leaf
+            .tbs_certificate((1u64 << 48) | 5, &der::OIDS_IANA)
+            .unwrap();
         let fields = der::parse_tbs(&tbs).unwrap();
         assert_eq!(
             entry_bytes_from_tbs(&fields, &[]).unwrap(),
@@ -421,7 +424,10 @@ mod tests {
             der::decode_integer_u64(fields.serial.content).unwrap(),
             (1u64 << 48) | 5
         );
-        assert_eq!(fields.signature.raw, der::alg_id_mtc_proof().as_slice());
+        assert_eq!(
+            fields.signature.raw,
+            der::alg_id_mtc_proof(&der::OIDS_IANA).as_slice()
+        );
         assert_eq!(Validity::from_der(&fields.validity).unwrap(), leaf.validity);
     }
 

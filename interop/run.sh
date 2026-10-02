@@ -10,7 +10,7 @@ DEMO_DIR="${DEMO_DIR:?set DEMO_DIR to the demo/ directory of the draft repositor
 DEMO="$DEMO_DIR/demo"
 [ -x "$DEMO" ] || { echo "no demo binary at $DEMO (run: cd $DEMO_DIR && go build -o demo .)" >&2; exit 2; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VECTORS="$ROOT/tests/vectors/interop-plants-07"
+VECTORS="$ROOT/tests/vectors/interop-iana"
 mkdir -p "$OUT"
 RESULTS="$OUT/results.txt"
 : > "$RESULTS"
@@ -45,7 +45,7 @@ else
   say "DIFFERENT verdicts, see go-to-rust.diff"; FAILURES=$((FAILURES+1))
 fi
 if diff -q "$OUT/go-verdicts.txt" "$VECTORS/expected.txt" >/dev/null; then
-  say "the Go verdicts equal tests/vectors/interop-plants-07/expected.txt"
+  say "the Go verdicts equal tests/vectors/interop-iana/expected.txt"
 else
   say "note: the Go verdicts differ from the recorded expected.txt (a newer demo?)"
 fi

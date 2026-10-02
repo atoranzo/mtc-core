@@ -57,6 +57,7 @@ fn world() -> World {
         ca_id: ca_id.clone(),
         log_number: 1,
         max_cert_lifetime: WEEK,
+        oids: mtc_core::OIDS_IANA,
     };
     let mut ca =
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();
@@ -315,6 +316,7 @@ fn the_ca_refuses_what_it_could_not_certify() {
         ca_id: w.ca_id.clone(),
         log_number: 1,
         max_cert_lifetime: WEEK,
+        oids: mtc_core::OIDS_IANA,
     };
     assert!(matches!(
         CertificationAuthority::new(cfg, Box::new(other), MemoryGuard::default()),
@@ -452,6 +454,7 @@ fn the_checkpoint_number_is_persisted_before_signing() {
         ca_id,
         log_number: 1,
         max_cert_lifetime: WEEK,
+        oids: mtc_core::OIDS_IANA,
     };
     let mut ca = CertificationAuthority::new(cfg, Box::new(signer), guard).unwrap();
     ca.submit(request(1)).unwrap();

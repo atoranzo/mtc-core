@@ -630,3 +630,75 @@ named above (§19), and the two pull requests, which wait for `draft-07`.
 about this crate, and the world moved without asking. A limit of the form
 "nothing else exists" needs a date next to it, or a reader to check it.
 
+
+## §18 · The IANA-assigned OIDs: written by default, and the two experimental sets still read
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What changed, and why now.** IANA assigned the three OIDs this protocol
+needs, and the draft's working copy adopted them on 2026-09-29 in the commit
+"We have PKIX OIDs!" (`ad4256b`): `id-alg-mtcProof` = `1.3.6.1.5.5.7.6.67`,
+`id-rdna-trustAnchorID` = `1.3.6.1.5.5.7.25.3`,
+`id-pe-mtcCertificationAuthority-SHA256` = `1.3.6.1.5.5.7.1.38`. The reference
+tool's `-version plants-07` writes them since then; OpenSSL's pull request and
+Bob Beck's Go CA accept them (and his CA writes them by default). This crate
+wrote the experimental `…44363.47.5`, `.47.3` and `.47.4`: a combination no
+tool writes any more, and that OpenSSL and the Go CA do not accept for the
+signature algorithm. Left as it was, every certificate from here would have
+been rejected by every other implementation within weeks.
+
+- `der::OidSet`: the three OIDs an implementation uses together. Three known
+  sets: `OIDS_IANA`; `OIDS_EXPERIMENTAL_06` (`.47.0`, `.47.3`, `.47.4`, the
+  `plants-06` one); and `OIDS_EXPERIMENTAL_47_5` (`.47.5`, `.47.3`, `.47.4`),
+  the interim one that §14's corpus was written with.
+- The CA writes the set in `CaConfig::oids`; the examples and the interop tool
+  default to IANA, and `interop generate -oids` chooses another.
+- A relying party accepts the three sets, **one set per certificate**: the
+  certificate's `id-alg-mtcProof` names the set, the TBS must repeat the same
+  `AlgorithmIdentifier` byte for byte, and the issuer's attribute must be the
+  set's. An IANA signature algorithm over an experimental issuer is
+  `UnknownIssuer`. `VerifiedCertificate::oids` reports the set.
+- `CaCertificate` carries its set; read, the extension's OID decides it, and
+  the subject must use the same set's attribute. The two experimental sets
+  share both OIDs and read as `OIDS_EXPERIMENTAL_06`.
+
+**What was measured.** Against the draft repository's `demo/` at
+`38014f7fb0086438a78a4b8353607fc4557eba70` (2026-10-01), Go 1.27.1, with
+`interop/run.sh` changed to its new corpus: Go → Rust, the same verdict for
+all 26 certificates (21 OK, 5 FAIL); Rust → Go, the same verdict as
+`EXPECTED.txt` for all 9, with this crate's CA certificate and with the Go
+tool's; the log of 2122 entries rebuilt from its tiles to the checkpoint's
+root, which is not §14's: the issuer's attribute is part of every entry, so
+every leaf changed with the OID. The verdicts are the same as §14's, file by
+file. And with `-version plants-06` the Go tool refuses the certificates from
+here, naming the attribute it wanted: the OID gate works in both directions.
+
+**The corpus.** `tests/vectors/interop-iana/`, the tool's output at that
+commit, joins `tests/vectors/interop-plants-07/`, which is kept and now says
+in its README which `plants-07` it is: the interim OIDs, which no tool writes
+any more. `tests/interop_corpus.rs` runs its four tests over both corpora and
+asserts the OID set of every accepted certificate; hiding the IANA corpus makes
+three of them fail, so it is read.
+
+**What else the draft changed since `99097c9e`**, read in its history and
+judged against what this crate encodes: `MTCProof.inclusion_proof` is now
+`opaque<0..2^16-1>` with the hashes concatenated, the same bytes with SHA-256;
+landmark-relative certificates MAY carry cosignatures (GREASE), which a
+relying party here already ignores when the subtree is trusted; trust anchor
+ID components can be arbitrarily large, and an implementation MAY bound them
+and MUST then fail closed, which `TrustAnchorId` does (arbitrary-precision
+ASCII; `arcs()` fails past `u64`); `SubtreeSignature` is renamed
+`Cosignature`. None changes a byte this crate writes.
+
+**Counters, re-run at this commit.** `cargo fmt --check`: clean · `cargo
+clippy --all-targets`: 0 warnings · `cargo test --release`: 68/0 (66 before,
+plus the OID-set test in `der` and the experimental round trip in `cacert`) ·
+without `ml-dsa`: 55/0 (53 before, plus the same two).
+
+**What it does not close.** The measurement against OpenSSL and the Go CA
+(§19). `draft-07` is not tagged yet; when it is, the run is repeated against
+its `demo/` and the two pull requests of #341 and #342 go with it.
+
+**Lesson.** A version name inside a tool is not a format: `plants-07` meant
+two different OID sets on the same day. The corpus says which commit wrote
+it, and that is what made the difference visible.
