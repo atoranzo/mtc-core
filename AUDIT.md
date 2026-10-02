@@ -641,7 +641,8 @@ needs, and the draft's working copy adopted them on 2026-09-29 in the commit
 `id-rdna-trustAnchorID` = `1.3.6.1.5.5.7.25.3`,
 `id-pe-mtcCertificationAuthority-SHA256` = `1.3.6.1.5.5.7.1.38`. The reference
 tool's `-version plants-07` writes them since then; OpenSSL's pull request and
-Bob Beck's Go CA accept them (and his CA writes them by default). This crate
+Bob Beck's Go CA accept them (and his CA writes them by default) [wrong: his
+CA writes the experimental `-06` set and reads both; measured in §19]. This crate
 wrote the experimental `…44363.47.5`, `.47.3` and `.47.4`: a combination no
 tool writes any more, and that OpenSSL and the Go CA do not accept for the
 signature algorithm. Left as it was, every certificate from here would have
@@ -702,3 +703,157 @@ its `demo/` and the two pull requests of #341 and #342 go with it.
 **Lesson.** A version name inside a tool is not a format: `plants-07` meant
 two different OID sets on the same day. The corpus says which commit wrote
 it, and that is what made the difference visible.
+
+
+## §19 · Measured against Bob Beck's Go stack and OpenSSL's pull request: the same verdicts, a TLS handshake, and one difference of policy
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What was measured**, with `interop/run-openssl.sh` (new), against OpenSSL
+at `ecf0476f6d979ef265a9c311abb5bb1890c7c75b` (pull request
+`openssl/openssl#33014`, "Accept the IANA-assigned Merkle Tree Certificate
+OIDs", 2026-09-29, built from source as `OpenSSL 4.2.0-dev`) and Bob Beck's
+`mtc` at `c6cdfe20db5651a01804f6ee15b1ba323e524a4e` (Go 1.27.1), with this
+crate at `33d1d942de78b2b370cc07bb86a0fbe7b78c00fd`. By the assistant, in a
+container; the author has not repeated it yet. `failures: 0`. In four parts,
+each with negatives:
+
+1. **This crate → `mtc verify`.** The corpus of §14 (nine certificates) plus
+   five for TLS, written once with the IANA OIDs and once with the
+   experimental `-06` set. `mtc verify`, with this crate's `subtrees.txt` and
+   the witness as a cosigner certificate (`cosigners.pem`) and a quorum of
+   one, gives every one of the 14 its expected verdict, in both sets (7 OK,
+   7 FAIL); this crate, reading the same two files, gives the same.
+2. **`mtc`'s CA → this crate.** His CA, with his mirror `32473.2` required,
+   issued 20 certificates in three batches (10 standalone, carrying the CA's
+   and the mirror's cosignatures; 10 landmark-relative, under three
+   landmarks), with the experimental `-06` OIDs, which is what it writes.
+   `interop/flip.py` (new, no MTC code: it walks the DER and the MTCProof's
+   length prefixes) cut four negatives from them: one bit of the inclusion
+   proof of a standalone and of a landmark-relative certificate, of the CA's
+   cosignature, and of the mirror's. Same verdict here as from his verifier on
+   all 24, in four configurations: the subtrees and the mirror required (22
+   OK, 2 FAIL; every certificate the CA issued verifies, and both flipped
+   proofs fail); the mirror required (10/14); the CA alone (11/13: the flipped
+   mirror cosignature is no longer read); and a subtree file with one wrong
+   hash (12/12: a trusted subtree that disagrees refuses even a certificate
+   whose cosignatures are good, in both).
+3. **This crate → OpenSSL, over TLS 1.3.** `interop generate -tls-key` issues
+   certificates for an ML-DSA-44 key that OpenSSL generated; OpenSSL's own
+   `generate_tai_chain` gives them their trust anchor IDs and groups (section
+   8.2.1); `s_server` holds them and `s_client`, with `-mtc_cas` and this
+   crate's CA certificate, judges what it is served, and the run checks which
+   certificate was served, not only the result. With the IANA OIDs, nine
+   handshakes, all as expected: the standalone certificate (`Verify return
+   code: 0`); the landmark-relative one, chosen by the server because the
+   client, given this crate's `landmarks.txt` and `subtrees.txt`, advertised
+   the landmark's group (0); a quorum of one cosigner with the witness's
+   cosigner certificate (0); the CA-only certificate with no quorum (0) and
+   with a quorum of one (111, "lacks the required cosignatures"); a flipped
+   bit of the proof in each form, a wrong subtree hash and another CA's
+   certificate under the same ID (110, "subtree is not trusted"). With the
+   experimental `-06` set, the standalone and the landmark-relative
+   handshakes (0, 0).
+4. **OpenSSL's corpus → this crate.** The 23 certificates of `test/mtc` in the
+   pull request (written by the draft's tool at `plants-06`, and derived by
+   hand), checked at OpenSSL's test instant (2025-01-01) with its cosigner
+   certificates and the union of its subtree files: 22 get the same verdict
+   here as from `mtc verify`, 12 OK and 10 FAIL (five signatureless ones
+   whose subtree has no hash in those files, one without the CA's
+   cosignature, the two malformed proofs and the two unordered cosignature
+   lists). One does not.
+
+**The difference.** `mtc-landmark-1-iana-alg.pem` is landmark 1's certificate
+with the IANA `id-alg-mtcProof` in both signature fields and the experimental
+`…47.3` attribute left in the issuer. OpenSSL's test expects it to verify
+(the case "a landmark certificate with the IANA-assigned id-alg-mtcProof"),
+`mtc verify` accepts it, and this crate refuses it, `UnknownIssuer`, because
+§18 accepts one OID set per certificate. It is not a byte this crate writes;
+it is a policy. The certificate conforms to neither text: the draft with the
+IANA OIDs names the IANA attribute for the issuer, and `-06` names the
+experimental algorithm. No CA writes it; OpenSSL made it by hand, to show
+that its verifier recognises each field on its own. The other two are more
+permissive during the transition; this crate is the stricter reading. Not
+changed: it is the author's decision, and perhaps a question for the list;
+accepting it would mean reading the issuer with any known set in `verify.rs`
+(its two signature fields are both IANA, so `proof.rs`'s check that they are
+equal already passes).
+
+**What the harness had wrong, before the run recorded here.**
+
+- A TLS handshake that does not happen leaves `s_client` printing `Verify
+  return code: 0 (ok)`: there was nothing to verify. The first version of the
+  TLS check passed nine of nine for that reason, the negatives included: the
+  server, started in the background with no input, read end-of-file and
+  closed each connection. It now requires the server's certificate in the
+  client's output and compares it with the one expected; `-www` keeps the
+  server from reading its input.
+- The check "every certificate the CA issued verifies" in part 2 filtered on
+  file names that do not begin with a digit; all of them do, so it could not
+  fail. Rewritten to count the issued certificates and the flipped proofs by
+  name.
+- Bob's CA allocates a landmark at each issuance, so every standalone subtree
+  of this run is also a landmark subtree, and a verifier given the subtrees
+  decides there and never reads a cosignature (section 7.2, step 11 before
+  step 12): with them, a flipped cosignature passes, here and in his verifier.
+  That is correct behaviour; the cosignature negatives are judged in the
+  configurations without the subtrees. And entry 9 of that log is alone in its
+  subtree `[9, 10)`, with an empty inclusion proof and no bit to flip: the
+  negatives use entry 0.
+- Part 4's list of certificates left in OpenSSL's two cosigner certificates
+  (`mtc-cosigner-32473.0.pem`, `-32473.2.pem`): the filter named
+  `mtc-cosigner.pem`, which does not exist. Both verifiers refused them
+  (`NotAnMtcCertificate`), so they agreed, and the count said 25 where the
+  corpus has 23. Found by reading the verdicts file by file before writing
+  them down here; the filter was fixed in the same, unpushed commit, and the
+  run repeated.
+
+**Falsified.** With the comparison of the trusted subtree's hash disabled in
+`verify.rs` (one line), the script reports five failures: part 1 in both OID
+sets, part 2 in two configurations and in the check of every issued
+certificate. Part 3 does not move, as it should not: there OpenSSL verifies,
+not this crate. The line was restored.
+
+**What was added.** To `examples/interop.rs`: `generate` writes `subtrees.txt`
+(the format of OpenSSL's `-mtc_subtrees`) and `cosigners.pem` (the witness as
+a cosigner certificate, the unsigned shape OpenSSL's `-mtc_cosigners` and
+`mtc verify --cosigner-cert` read; the draft does not define it), and with
+`-tls-key` one more entry, a third landmark, five certificates and
+`tls_chains.txt`, all after the corpus is written so that none of its
+certificates changes; `verify` takes `-subtrees` and `-cosigner-cert` (a
+certificate with the MTC CA extension is refused there). New:
+`interop/run-openssl.sh`, `interop/flip.py`, and the section of
+`interop/README.md` that describes them. Nothing in the library: the cosigner
+certificate is configuration for other relying parties, and lives in the
+example.
+
+**One correction to §18.** §18 said that Bob Beck's CA writes the IANA OIDs by
+default. It writes the experimental `-06` set and reads both: his README says
+so, and `mtc inspect` of the certificates of part 2 shows
+`1.3.6.1.4.1.44363.47.0`. The sentence in §18 is kept, marked, with a pointer
+here. Its conclusion stands: to read his CA this crate needs the `-06` set,
+and reads it (part 2).
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo test`: 68/0 · without `ml-dsa`:
+55/0. No test was added: what changed is the example and two scripts,
+which `cargo test` does not run, and the measurement is the script.
+
+**What it does not close.**
+
+- The author's run of `interop/run-openssl.sh` on his machine (§15 did that for
+  `demo/`).
+- The difference above: the author decides whether to keep the stricter
+  reading, and whether to ask the list.
+- An offline corpus from these two, as `tests/vectors/interop-iana/` is for
+  `demo/`: it would carry third-party files under their licences (Apache 2.0
+  for OpenSSL's; Bob Beck's repository's own), which is the author's call.
+- Client authentication, ACME and the mirror protocol: not measured; this
+  crate has no mirror and no TLS.
+
+**Lesson.** A pass that cannot fail is not a measurement. `s_client` reports
+success when nothing was verified, a filter can empty the set it was meant to
+test, and another can let in what it was meant to leave out. The checks now
+look for the thing itself (the certificate served, the file by name), the
+script was made to fail on purpose, and its verdicts were read one by one
+before the result was written down.
