@@ -565,7 +565,8 @@ per version, one ledger entry per change) and none of the STARK code.
   and OpenSSL's own test corpus gets the same verdicts here as from his
   verifier, except one certificate that mixes the IANA signature algorithm
   with the experimental issuer, which both accept and this crate refuses (a
-  policy difference, recorded in §19). That run was made by the assistant in a
+  policy difference, recorded in §19; the stricter reading is kept, and a test
+  holds it, §22). That run was made by the assistant in a
   container and repeated by the author on his machine, with the same result
   (§21). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
   since `ad4256b`, and the measurement was repeated against it at `38014f7`,

@@ -954,3 +954,58 @@ authentication, ACME and the mirror protocol. And the merge of `next` into
 **Lesson.** The second machine agreed on every verdict, and its first attempt
 found a fault in the script, not in the crate (§20). The run on the author's
 machine checks the instrument as well as the thing measured.
+
+## §22 · One OID set per certificate: the stricter reading kept, and a test that holds it
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**The decision.** The author's, on 2026-10-02: the difference of §19 stays.
+A certificate whose `id-alg-mtcProof` names one OID set and whose issuer uses
+another set's trust anchor ID attribute is refused (`UnknownIssuer`), as
+OpenSSL's `mtc-landmark-1-iana-alg.pem` is here. Whether to ask the working
+group he left to the assistant (below).
+
+**Why the stricter reading.** Neither text defines that shape: the draft with
+the IANA OIDs names the IANA attribute for the issuer, and `-06` names the
+experimental algorithm. No CA measured here writes it: `demo/` writes the IANA
+set, Bob Beck's CA the `-06` set, this crate either, each whole. And the log
+entry omits the signature algorithm, so the proof does not bind it: read
+field by field, the algorithm may say one set and the name another, and
+nothing checks that they agree. The stricter reading refuses nothing that any
+of these CAs writes. Its cost, if a CA in transition ever writes the mixed
+shape, is that this crate refuses certificates that OpenSSL and `mtc` accept;
+that is the reason to ask.
+
+**What changed.** Nothing in the library. `tests/end_to_end.rs` gains
+`a_certificate_that_mixes_oid_sets_is_refused`: the CA issues with the
+experimental `-06` set and then with the IANA set; each certificate verifies
+and reports its set; then both signature fields are rewritten to the other
+set's algorithm, the issuer untouched (the shape of OpenSSL's file, in both
+directions). The result parses as an MTC certificate of the other set with the
+same proof, and is refused with `UnknownIssuer`. `world()` becomes
+`world_with(oids)`, with `world()` the IANA case as before. README section 7
+and `interop/README.md` say that the stricter reading is kept.
+
+**Falsified.** With the issuer read under any known set in `verify.rs` (the
+change §19 named), the test fails, and in the useful way: the mixed
+certificate verifies, `Ok`, with the CA's and the witness's cosignatures. So
+the proof and the cosignatures are good, and the policy is the only thing that
+refuses it; and `verify.rs` is the only file that would change, as §19 said.
+The line was restored.
+
+**The list.** Asking was the assistant's call, and the call is to ask: three
+implementations disagree on a certificate, the draft does not say what a
+relying party does with mixed OIDs during the transition, and the draft's
+principal author answered both issues of §17. One short question, as a reply in the
+author's thread of 2026-09-30, drafted and handed to him; not sent: sending is
+his. If the answer is to accept, `verify.rs` changes and this test turns over.
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo test`: 69/0 (68 before, plus this test) · without
+`ml-dsa`: 55/0 (`tests/end_to_end.rs` needs `ml-dsa`).
+
+**What it does not close.** The working group's answer.
+
+**Lesson.** A decision not to change the code is still a decision about what
+the code does; without a test, the next change could undo it without anyone
+deciding.

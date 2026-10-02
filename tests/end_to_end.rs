@@ -12,8 +12,8 @@ use mtc_core::verify::{
     verify_certificate, Basis, CosignerEntry, RelyingPartyConfig, TrustedSubtree, VerifyError,
 };
 use mtc_core::{
-    CaConfig, CertificateRequest, CertificationAuthority, MemoryGuard, Subtree, TrustAnchorId,
-    Validity,
+    CaConfig, CertificateRequest, CertificationAuthority, MemoryGuard, OidSet, Subtree,
+    TrustAnchorId, Validity, OIDS_EXPERIMENTAL_06, OIDS_IANA,
 };
 
 const NOW: u64 = 1_800_000_000;
@@ -47,6 +47,10 @@ struct World {
 }
 
 fn world() -> World {
+    world_with(mtc_core::OIDS_IANA)
+}
+
+fn world_with(oids: OidSet) -> World {
     let ca_id = TrustAnchorId::from_ascii("32473.1").unwrap();
     let witness_id = TrustAnchorId::from_ascii("32473.77").unwrap();
     let ca_signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id.clone(), [1u8; 32]);
@@ -57,7 +61,7 @@ fn world() -> World {
         ca_id: ca_id.clone(),
         log_number: 1,
         max_cert_lifetime: WEEK,
-        oids: mtc_core::OIDS_IANA,
+        oids,
     };
     let mut ca =
         CertificationAuthority::new(cfg, Box::new(ca_signer), MemoryGuard::default()).unwrap();
@@ -222,6 +226,58 @@ fn standalone_certificates_verify_with_ca_and_witness_cosignatures() {
         .signatures
         .sort_by(|a, b| a.cosigner_id.cmp(&b.cosigner_id));
     assert!(verify_certificate(&greased.to_der().unwrap(), &cfg, NOW).is_ok());
+}
+
+/// `cert` with the `id-alg-mtcProof` of `oids` in both signature fields and
+/// everything else, the issuer included, untouched: the shape of OpenSSL's
+/// `test/mtc/mtc-landmark-1-iana-alg.pem` (AUDIT.md §19).
+fn with_signature_algorithm(cert: &MtcCertificate, oids: OidSet) -> Vec<u8> {
+    let (tbs, _) = der::read_tlv(&cert.tbs_certificate).unwrap();
+    let old = der::alg_id_mtc_proof(&cert.oids);
+    let at: Vec<usize> = (0..tbs.content.len())
+        .filter(|&i| tbs.content[i..].starts_with(&old))
+        .collect();
+    assert_eq!(at.len(), 1, "the TBS names its algorithm once");
+    let mut content = tbs.content[..at[0]].to_vec();
+    content.extend(der::alg_id_mtc_proof(&oids));
+    content.extend(&tbs.content[at[0] + old.len()..]);
+    MtcCertificate {
+        tbs_certificate: der::sequence(&content),
+        oids,
+        ..cert.clone()
+    }
+    .to_der()
+    .unwrap()
+}
+
+/// One OID set per certificate, kept by the author's decision (AUDIT.md
+/// §22): a certificate whose signature algorithm names one set and whose
+/// issuer uses the other's attribute is refused, in both directions. OpenSSL
+/// and Bob Beck's `mtc` accept it field by field. What fails is the issuer,
+/// not the proof: the log entry omits the signature algorithm.
+#[test]
+fn a_certificate_that_mixes_oid_sets_is_refused() {
+    for (issued, named) in [
+        (OIDS_EXPERIMENTAL_06, OIDS_IANA),
+        (OIDS_IANA, OIDS_EXPERIMENTAL_06),
+    ] {
+        let mut w = world_with(issued);
+        w.ca.submit(request(0)).unwrap();
+        w.ca.run_checkpoint_job(NOW).unwrap();
+        let cfg = rp(&w, vec![]);
+        let cert = w.ca.standalone_certificate(0).unwrap();
+        let v = verify_certificate(&cert.to_der().unwrap(), &cfg, NOW).unwrap();
+        assert_eq!(v.oids, issued);
+
+        let mixed = with_signature_algorithm(&cert, named);
+        let parsed = MtcCertificate::from_der(&mixed).unwrap();
+        assert_eq!(parsed.oids, named);
+        assert_eq!(parsed.proof, cert.proof);
+        assert_eq!(
+            verify_certificate(&mixed, &cfg, NOW),
+            Err(VerifyError::UnknownIssuer)
+        );
+    }
 }
 
 /// What the CA checks on the way in: validity, DER form, entry extensions;
