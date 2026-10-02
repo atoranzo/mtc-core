@@ -1057,8 +1057,19 @@ the known difference of §19.
 **Counters.** Only the two scripts and `interop/README.md` changed; the
 counters are §22's, which the author's machine gave at `4661a4c` (above).
 
-**What it does not close.** §18's measurement on the author's machine: the
-same command again, with `go` on `PATH`.
+**The run, repeated.** On the author's machine, at `8452e23`, 2026-10-02 at
+08:50:21 UTC, with `go` on `PATH` (Go 1.27.1, rustc 1.97.1): "demo: 38014f7…,
+built here (vcs.revision 38014f7…); tracked files changed in the checkout: 0".
+Go → Rust, the same verdict for all 26 certificates (21 OK, 5 FAIL), equal to
+`tests/vectors/interop-iana/expected.txt`; Rust → Go, the same verdict as
+`EXPECTED.txt` for all 9, with this crate's CA certificate and with the Go
+tool's, and the witness's SPKI line byte-identical; the log, 2122 entries
+rebuilt from the tiles to the root `i35OIgqu…`, the checkpoint's and §18's,
+with the CA's key ID `e5375464` and its signature line verifying. `failures:
+0`, exit status 0. §18 is repeated on the author's machine.
+
+**What it does not close.** Nothing of §18. The working group's answer to §22,
+and `draft-07`, which is not tagged yet.
 
 **Lesson.** A record must take the name of what it measured from the thing
 measured. The script read the commit from the checkout and ran the binary

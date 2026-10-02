@@ -570,8 +570,7 @@ per version, one ledger entry per change) and none of the STARK code.
   container and repeated by the author on his machine, with the same result
   (§21). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
   since `ad4256b`, and the measurement was repeated against it at `38014f7`,
-  with the same verdicts (§18; by the assistant, not yet on the author's
-  machine).
+  with the same verdicts (§18; repeated by the author on his machine, §23).
   Cloudflare's own `bwesterb/mtc` still follows the earlier batch
   design. Against `demo/`, in both directions
   and with negatives, everything measured agrees: its 26 verdicts are
