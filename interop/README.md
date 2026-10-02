@@ -137,7 +137,8 @@ both, in four parts, each with negatives:
    difference is reported apart: `mtc-landmark-1-iana-alg.pem` mixes the IANA
    signature algorithm with the experimental issuer; OpenSSL and `mtc` accept
    it field by field, this crate refuses it (one OID set per certificate, §18;
-   kept by the author's decision, §22).
+   kept by the author's decision, §22, and in line with the answer on the
+   list: one CA, one draft, one set of OIDs, §24).
 
 It needs OpenSSL built from the pull request, its source tree (for
 `test/mtc`), `mtc` built with Go 1.27 or later, and `python3`:

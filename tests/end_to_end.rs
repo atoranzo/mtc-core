@@ -251,7 +251,9 @@ fn with_signature_algorithm(cert: &MtcCertificate, oids: OidSet) -> Vec<u8> {
 }
 
 /// One OID set per certificate, kept by the author's decision (AUDIT.md
-/// §22): a certificate whose signature algorithm names one set and whose
+/// §22) and in line with the draft's principal author's answer on the list,
+/// one CA, one draft, one set of OIDs (§24): a certificate whose signature
+/// algorithm names one set and whose
 /// issuer uses the other's attribute is refused, in both directions. OpenSSL
 /// and Bob Beck's `mtc` accept it field by field. What fails is the issuer,
 /// not the proof: the log entry omits the signature algorithm.

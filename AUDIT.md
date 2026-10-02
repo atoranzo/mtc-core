@@ -1075,3 +1075,100 @@ and `draft-07`, which is not tagged yet.
 measured. The script read the commit from the checkout and ran the binary
 beside it, and the two had parted. Now the binary is built from the checkout,
 or its own build record is read.
+
+## §24 · The working group's answers: one CA, one draft, one set of OIDs; and the entry's format belongs to the signature algorithm
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**The answer to §22.** David Benjamin, the draft's principal author, on
+`plants@ietf.org`, 2026-10-02, in two messages: "any given CA is always
+exactly one draft, and any given draft is always exactly one set of OIDs.
+Transitioning to a newer draft looks like rotating CAs. That avoids worrying
+about weird interactions between older and newer versions of the protocol";
+past practice was not "the tidiest", so "every draft with incompatible changes
+should, at minimum, change the CA OID, to signal the draft version"; and,
+five minutes later, "Up to editorial changes, that is": if `draft-07` survives
+its first deployments, the PKIX OIDs stay to the end, and any later
+incompatible change is "tied to the particular CA". He will "cut draft-07
+soon, with the PKIX OIDs". A certificate that mixes the IANA algorithm with
+the experimental issuer belongs to no draft, so the refusal of §22 stands, now
+in line with the draft's author and not only by the author's choice. Read with
+care: the messages say how CAs migrate, not what a relying party must enforce,
+and they do not define "the CA OID". The likeliest reading is the Merkle Tree
+CA extension: the draft makes it the format signal ("If a later version of the
+protocol defines a new format, this SHOULD be represented in CA certificates
+with a new extension type"), and a draft cannot change a CA's ID. The
+interim `.47.5` set changed only `id-alg-mtcProof` and kept that extension:
+the untidiness he names.
+
+**The other thread, "MTCLogEntry extensibility"** (2026-10-01 and 02). Valery
+Smyslov proposed carrying `MTCLogEntryType` in `MTCProof`. The author answered
+on 2026-10-01 that the relying party builds the entry it expects, and that in
+this crate "the RP never reads the type from the wire": true, checked
+(`src/entry.rs`, the verification path writes the constant `TBS_CERT_ENTRY`;
+a type is read only from log entries, when a log is rebuilt from its tiles).
+Valery objected that an RP would honour only certificate types; the author
+conceded on 2026-10-02 that such a field "would be safe" for an RP that builds
+each type by its own rules, in a reply the assistant drafted. David Benjamin
+then called the field "risky, redundant, and quite possibly" self-defeating:
+"risky because it tempts implementations to copy-paste the type while keeping
+the entry calculation the same", which is the failure the author's first
+message described. The draft "does provide the RP with this information. It's
+the part of signature algorithm definition": a second certificate entry type
+would get a new signature algorithm, and "could even ... coexist on one CA".
+The assistant's draft conceded more than it needed to; the concession was
+conditional and not false, and it is recorded here as it was sent.
+
+**What the answer showed about this crate.** Measured by a set of independent
+agents on a copy of `290c7d5`, each claim then put to a skeptic, and the
+central one repeated by hand: `RelyingPartyConfig` holds no OID set, and
+`verify_certificate` compares the issuer's CA ID, read with the certificate's
+own set, with the configured one. So a relying party configured from a CA
+certificate of one family accepts a consistent certificate of the other under
+the same CA ID: `interop verify -ca-cert tests/vectors/interop-iana/ca_cert.pem
+tests/vectors/interop-plants-07/cert_10_0.pem` prints OK, and so does the
+reverse pairing. It is not a forgery: the issuer's attribute is in the log
+entry, so such a certificate exists only if the CA logged it; here the two
+corpora share the demo's test key. Within the experimental family it is
+weaker still: `-06` and `.47.5` differ only in `id-alg-mtcProof`, which the
+entry omits and a CA certificate never carries, so a certificate can be
+relabelled from one to the other by anyone, and is accepted either way.
+OpenSSL's pull request and Bob Beck's `mtc` tie no OID set to a CA either, and
+accept every cross-family pairing tried.
+
+**The gap, named.** The draft's procedure "only replaces the signature
+verification portion of X.509 path validation. The relying party MUST continue
+to perform other checks". Path validation chains names: the certificate's
+issuer must be the CA's name, and a name includes its attribute's type. This
+crate compares only the CA ID. `UnknownIssuer` is documented as "the `issuer`
+is not the `Name` of the configured CA", and the Name, attribute included, is
+never compared.
+
+**The options, and the recommendation.** (1) Record the answer and change
+nothing. (2) A family pin: the relying party keeps the CA certificate's set,
+and the issuer's attribute must be that set's; full equality of the set is
+wrong, because a CA certificate reads as `-06` for both experimental sets and
+the interim corpus would fail (measured). In a scratch copy, (2) changed no
+verdict in any test, either corpus, `run.sh` or `run-openssl.sh` (whose 22
+other OpenSSL fixtures stay within one family), and the mixed certificate is
+still refused by the rule of §22. It needs one field in `RelyingPartyConfig`
+and its four construction sites. (3) An exact pin with the set given out of
+band, to separate `-06` from `.47.5`: rejected, since a CA certificate cannot
+say it and `.47.5` is in no published draft. (4) When `draft-07` is cut,
+retire `.47.5`; the CA certificate then fixes the set with no configuration.
+The recommendation is (2) now and (4) at `draft-07`, and (2) on the CA-level
+OIDs only, not on `id-alg-mtcProof`: David Benjamin's second thread says a
+later certificate format would come with a new signature algorithm, possibly
+on the same CA. It is the author's decision; this commit changes no code.
+
+**What changed.** This entry, and three pointers to it: the doc comment of
+`a_certificate_that_mixes_oid_sets_is_refused`, README section 7 and
+`interop/README.md`. The counters are §22's (only a comment changed in Rust:
+`cargo fmt --check` clean).
+
+**What it does not close.** The decision on (2); `draft-07`.
+
+**Lesson.** A question about one certificate got an answer about the CA, and
+the answer showed that this crate checked less than its own documentation
+said. The draft's author wrote the rule for CAs; what it asks of a relying
+party had to be measured here.
