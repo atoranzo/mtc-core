@@ -904,3 +904,53 @@ what he pasted.
 **Lesson.** A missing tool must not look like a verifier's answer. A check that
 tolerates failure (here, so that a FAIL verdict does not stop the run) needs
 the tool's presence checked first, or its silence reads as a result.
+
+## §21 · The run against Bob Beck's Go stack and OpenSSL, on the author's machine
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What changed.** Nothing in the code: this entry records the author's own
+execution of `interop/run-openssl.sh` and of the gates, which §19 and §20 left
+as his to record, and corrects README section 7, which said he had not
+repeated the run.
+
+**The run.** `interop/run-openssl.sh` at commit `d2dff18`, on 2026-10-02 at
+08:03:47 UTC, on his machine (WSL2), with Go 1.27.1 installed from go.dev;
+Bob Beck's `mtc` at `c6cdfe20db5651a01804f6ee15b1ba323e524a4e` built with
+`go build` (its `golang.org/x/crypto` v0.56.0 from the module proxy); OpenSSL
+at `ecf0476f6d979ef265a9c311abb5bb1890c7c75b` built from source (`OpenSSL
+4.2.0-dev`); rustc 1.97.1 (8bab26f4f 2026-07-14), cargo 1.97.1. Its
+`results.txt`, in substance:
+
+1. This crate → `mtc verify`: with the IANA OIDs and with the experimental
+   `-06` set, `mtc verify` and this crate each give all 14 certificates their
+   expected verdict (7 OK, 7 FAIL).
+2. `mtc`'s CA → this crate: 20 certificates issued (10 landmark-relative)
+   under 3 landmarks, 4 negatives derived; the same verdict as `mtc verify`
+   for all 24 in the four configurations (22/2, 10/14, 11/13, 12/12 OK/FAIL);
+   every certificate the CA issued verifies, and each flipped proof fails.
+3. This crate → OpenSSL over TLS 1.3: the nine handshakes with the IANA OIDs
+   and the two with the `-06` set, each serving the expected certificate and
+   ending with the expected code (0; 111 for the CA-only certificate under a
+   quorum of one; 110 for the flipped proofs, the wrong subtree hash and the
+   other CA under the same ID).
+4. OpenSSL's corpus → this crate: the same verdict as `mtc verify` for 22
+   certificates (12 OK, 10 FAIL); `mtc-landmark-1-iana-alg.pem` reported apart,
+   `mtc verify` OK and this crate FAIL, the known difference of §19.
+
+`failures: 0`, exit status 0. The same numbers as §19's run in the container.
+
+**Counters, run on this machine, at `d2dff18`.** `cargo fmt --check`: clean ·
+`cargo clippy --all-targets -- -D warnings`: clean · `cargo test`: 68/0 ·
+without `ml-dsa`: 55/0.
+
+**What it does not close.** The difference of policy in §19: whether to keep
+the stricter reading of mixed OID sets, and whether to ask the list. The
+repetition of §18's measurement against `demo/` at `38014f7` on this machine.
+An offline corpus from these two implementations (their licences). Client
+authentication, ACME and the mirror protocol. And the merge of `next` into
+`main`, which is the author's.
+
+**Lesson.** The second machine agreed on every verdict, and its first attempt
+found a fault in the script, not in the crate (§20). The run on the author's
+machine checks the instrument as well as the thing measured.

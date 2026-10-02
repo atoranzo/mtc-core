@@ -546,9 +546,9 @@ per version, one ledger entry per change) and none of the STARK code.
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is
   corrected and covered by tests, and that is no substitute for an audit.
-- **Interoperability is measured against three implementations, and only
-  the first on the author's machine so far.** The `demo/` directory of the
-  draft's repository (a generator and a verifier in Go, commit `99097c9e`,
+- **Interoperability is measured against three implementations.** The
+  `demo/` directory of the draft's repository (a generator and a verifier in
+  Go, commit `99097c9e`,
   `-version plants-07`) was the first measured. Since 2026-09-29 there are two
   more, announced on the working group's list with an end-to-end
   demonstration (AUDIT.md §17): OpenSSL's (pull request
@@ -566,9 +566,11 @@ per version, one ledger entry per change) and none of the STARK code.
   verifier, except one certificate that mixes the IANA signature algorithm
   with the experimental issuer, which both accept and this crate refuses (a
   policy difference, recorded in §19). That run was made by the assistant in a
-  container; the author has not repeated it yet. The OIDs changed meanwhile:
-  `demo/` writes the IANA-assigned ones since `ad4256b`, and the measurement
-  was repeated against it at `38014f7`, with the same verdicts (§18).
+  container and repeated by the author on his machine, with the same result
+  (§21). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
+  since `ad4256b`, and the measurement was repeated against it at `38014f7`,
+  with the same verdicts (§18; by the assistant, not yet on the author's
+  machine).
   Cloudflare's own `bwesterb/mtc` still follows the earlier batch
   design. Against `demo/`, in both directions
   and with negatives, everything measured agrees: its 26 verdicts are
