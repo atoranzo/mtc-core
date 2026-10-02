@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # The interoperability run against the draft's reference implementation.
 # Usage: DEMO_DIR=/path/to/merkle-tree-certs/demo interop/run.sh OUTDIR
-# Requires: the `demo` binary built in DEMO_DIR (Go 1.27+), cargo.
+# Requires: Go 1.27+ (the demo is built here, from DEMO_DIR), cargo.
 # Writes OUTDIR/results.txt and exits non-zero if any comparison differs.
 set -euo pipefail
 
 OUT="${1:?usage: DEMO_DIR=... interop/run.sh OUTDIR}"
 DEMO_DIR="${DEMO_DIR:?set DEMO_DIR to the demo/ directory of the draft repository}"
-DEMO="$DEMO_DIR/demo"
-[ -x "$DEMO" ] || { echo "no demo binary at $DEMO (run: cd $DEMO_DIR && go build -o demo .)" >&2; exit 2; }
+go version >/dev/null 2>&1 || { echo "go is required, 1.27 or later (from go.dev: is /usr/local/go/bin on PATH?)" >&2; exit 2; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VECTORS="$ROOT/tests/vectors/interop-iana"
 mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"
+# The demo is built here from DEMO_DIR, so that the binary measured is the
+# checkout named below: one built earlier, from another commit, was once
+# measured under this one's name (AUDIT.md §23).
+DEMO="$OUT/demo-built"
+(cd "$DEMO_DIR" && go build -o "$DEMO" .) || { echo "go build failed in $DEMO_DIR" >&2; exit 2; }
+build_info() { go version -m "$DEMO" | sed -n "s/^[[:space:]]*build[[:space:]]*$1=//p"; }
 RESULTS="$OUT/results.txt"
 : > "$RESULTS"
 FAILURES=0
@@ -20,12 +26,13 @@ say() { echo "$*" | tee -a "$RESULTS"; }
 verdict() { sed -E 's/^([^:]*): OK$/\1 OK/; t; s/^([^:]*): .*$/\1 FAIL/' | sed -E 's#^.*/##' | sort -V; }
 
 say "# mtc-core interoperability run, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-say "demo: $(git -C "$DEMO_DIR" rev-parse HEAD 2>/dev/null || echo unknown) ($(git -C "$DEMO_DIR" log -1 --format=%cd --date=short 2>/dev/null || echo unknown))"
+say "demo: $(git -C "$DEMO_DIR" rev-parse HEAD 2>/dev/null || echo unknown) ($(git -C "$DEMO_DIR" log -1 --format=%cd --date=short 2>/dev/null || echo unknown)), built here (vcs.revision $(build_info vcs.revision)); tracked files changed in the checkout: $(git -C "$DEMO_DIR" status --porcelain --untracked-files=no 2>/dev/null | wc -l)"
 say "go: $(cd "$DEMO_DIR" && go version)"
 say "rust: $(rustc --version), $(cargo --version)"
 say "mtc-core: $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 
-(cd "$ROOT" && cargo build --release --example interop >/dev/null 2>&1)
+(cd "$ROOT" && cargo build --release --example interop >/dev/null 2>&1) ||
+  { echo "cargo build --release --example interop failed in $ROOT" >&2; exit 2; }
 INTEROP="$ROOT/target/release/examples/interop"
 
 # ── 1. Go → Rust ──

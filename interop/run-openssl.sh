@@ -20,6 +20,13 @@ MTC="${MTC:?set MTC to the mtc binary of github.com/bob-beck/cloudflare-mtc}"
 [ -x "$MTC" ] || { echo "no mtc binary at $MTC (build it with Go 1.27 or later: cd cloudflare-mtc && go build -o mtc ./cmd/mtc)" >&2; exit 2; }
 "$MTC" --help >/dev/null 2>&1 || { echo "$MTC does not run" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 2; }
+# The commit is the binary's own, as Go recorded it at build time; the
+# checkout's HEAD may have moved since (AUDIT.md §23).
+MTC_REV=$(go version -m "$MTC" 2>/dev/null | sed -n 's/^[[:space:]]*build[[:space:]]*vcs.revision=//p' || true)
+MTC_HEAD=$(git -C "${MTC_SRC:-/nonexistent}" rev-parse HEAD 2>/dev/null || true)
+if [ -n "$MTC_REV" ] && [ -n "$MTC_HEAD" ] && [ "$MTC_REV" != "$MTC_HEAD" ]; then
+  echo "$MTC was built from $MTC_REV, but $MTC_SRC is at $MTC_HEAD: rebuild it (go build -o mtc ./cmd/mtc)" >&2; exit 2
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLIP="$ROOT/interop/flip.py"
 mkdir -p "$OUT"
@@ -46,7 +53,7 @@ same() { # LABEL A B
 
 say "# mtc-core interoperability run against Bob Beck's mtc and OpenSSL, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 say "openssl: $("$OPENSSL" version) at $(git -C "$OPENSSL_SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
-say "mtc: $(git -C "${MTC_SRC:-/nonexistent}" rev-parse HEAD 2>/dev/null || echo "commit not recorded (set MTC_SRC)")"
+say "mtc: ${MTC_REV:-${MTC_HEAD:-commit not recorded (set MTC_SRC, or put go on PATH)}}"
 say "rust: $(rustc --version), $(cargo --version)"
 say "mtc-core: $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 

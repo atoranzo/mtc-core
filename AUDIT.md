@@ -1011,3 +1011,56 @@ answer is to accept, `verify.rs` changes and this test turns over.
 **Lesson.** A decision not to change the code is still a decision about what
 the code does; without a test, the next change could undo it without anyone
 deciding.
+
+## §23 · The author's repetition of §18: a demo built from another commit, measured under this one's name
+
+**Commit** the one that adds this entry · 2026-10-02 · branch `next`, for the author's review
+
+**What happened.** On his machine, at `4661a4c`, the gates passed: `cargo fmt
+--check` and `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+69/0 (the test of §22 among them), 55/0 without `ml-dsa`. Then
+`interop/run.sh`, to repeat §18: his checkout of the draft's repository moved
+from `99097c9` to `38014f7`, but `go build` did not run, because `go` was not
+on that shell's `PATH` (Go is in `/usr/local/go` since §21; that shell did not
+have it). The script only checked that `DEMO_DIR/demo` existed, and it did:
+the binary built for §15, at `99097c9`. So it measured `99097c9` and wrote
+"demo: 38014f7". Go → Rust, the same 26 verdicts; Rust → Go, "DIFFERENT"
+twice; the log rebuilt to `nZNno7jR…`, which is §14's root, not §18's
+`i35OIgqu…`; `failures: 2`. At `99097c9`, `plants-07` meant the interim OIDs,
+and that verifier refuses this crate's IANA certificates by design (§18 says
+so). Not a fault of this crate.
+
+**Reproduced** in the container: a checkout at `38014f7` with a demo binary
+built at `99097c9` inside it gives the same `results.txt`, line for line, root
+and `failures: 2` included; `go version -m` on that binary shows
+`vcs.revision=99097c9…`. Parts 1 and 3 passed because they compare the Go tool
+with itself and with this crate, not with a fixed OID set, and the verdicts by
+file are the same under either set; only part 2 depends on the set the
+verifier reads.
+
+**What changed.** `interop/run.sh` builds the demo itself, from `DEMO_DIR` into
+the output directory, so that the binary measured is the commit recorded. It
+checks first that `go` runs (exit 2 and a message otherwise), and records the
+binary's `vcs.revision` and the number of tracked files changed in the
+checkout (not Go's `vcs.modified`, which counts untracked files such as a
+binary built there). A failed `cargo build` of the example now says so.
+`interop/run-openssl.sh` records the `mtc` binary's own `vcs.revision`, and
+stops if it is not `MTC_SRC`'s commit. `interop/README.md` says both.
+
+**Checked.** `run.sh`: without `go` on `PATH`, exit 2 with the message and
+nothing written; with the checkout that holds the old binary, `failures: 0`,
+the root `i35OIgqu…` and `vcs.revision 38014f7…`; with a clean checkout at
+`38014f7`, `failures: 0`. `run-openssl.sh`: with `MTC_SRC` at another commit,
+exit 2 with the message; the full run, `failures: 0`, `mtc: c6cdfe2…`, and
+the known difference of §19.
+
+**Counters.** Only the two scripts and `interop/README.md` changed; the
+counters are §22's, which the author's machine gave at `4661a4c` (above).
+
+**What it does not close.** §18's measurement on the author's machine: the
+same command again, with `go` on `PATH`.
+
+**Lesson.** A record must take the name of what it measured from the thing
+measured. The script read the commit from the checkout and ran the binary
+beside it, and the two had parted. Now the binary is built from the checkout,
+or its own build record is read.

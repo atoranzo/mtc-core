@@ -59,7 +59,10 @@ rejects every certificate from here by design: its OIDs are another set.
 ## Procedure
 
 `run.sh` does all of it and writes `results.txt`; `DEMO_DIR` is the
-`demo/` directory above with the built binary in it:
+`demo/` directory above. The script builds the demo itself from that checkout,
+into the output directory, so that the binary measured is the commit recorded
+(one built earlier, from another commit, once was not: AUDIT.md §23); it needs
+`go` on `PATH`:
 
 ```sh
 DEMO_DIR=/path/to/merkle-tree-certs/demo interop/run.sh /tmp/mtc-interop
@@ -153,7 +156,8 @@ MTC=$PWD/cloudflare-mtc/mtc MTC_SRC=$PWD/cloudflare-mtc \
 ```
 
 `results.txt` in the output directory has the record; `failures: 0` is the
-pass. The mirror listens on a free local port while the CA issues, and is
+pass. The commit recorded for `mtc` is the one Go wrote into the binary when it
+was built; if it is not `MTC_SRC`'s, the script stops and asks for a rebuild. The mirror listens on a free local port while the CA issues, and is
 stopped after.
 
 ## What the tool cannot express
