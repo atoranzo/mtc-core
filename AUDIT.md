@@ -1277,3 +1277,101 @@ the new check. It did not check that the old test still fails without the
 old rule. A new check can shadow an old one, and a test that passed for the
 right reason can go on passing for the wrong one; each rule needs a case in
 which it alone refuses.
+
+## §26 · `draft-07`: measured against its demo, the interim OIDs retired, and the two pull requests prepared
+
+**Commit** the one that adds this entry · 2026-10-07 · branch `next`, for the author's review
+
+**`draft-07`.** The tag `draft-ietf-plants-merkle-tree-certs-07` is
+`6c5896d` (2026-10-07, David Benjamin), also the repository's `main`. Since
+`38014f7` (§18) there are four commits, all in the draft's text:
+`CosignedMessage` is renamed `CosignedSubtree`, with no byte changed, and the
+C2SP references are pinned to versions (`tlog-cosignature@v1.1.0`,
+`tlog-tiles@v1.0.0`, `tlog-witness@v1.1.0`, `tlog-mirror@v0.1.0`,
+`mtc-tlog@v0.1.0`). `demo/` is identical to `38014f7`. This crate keeps the
+name `CosignedMessage` (`src/cosign.rs`); the rename is editorial and is not
+done here. The daily check of the tag, set up on 2026-10-02, saw no tag at
+06:49 UTC that day and was turned off once it existed.
+
+**Measured.** `interop/run.sh` against `demo/` at `6c5896d`, built by the
+script: before this change, at `310e73a`, and again on this change before
+its commit: Go → Rust, the same verdict for all 26 certificates (21 OK, 5
+FAIL); Rust → Go, the same verdict as `EXPECTED.txt` for all 9, with this
+crate's CA certificate and with the Go tool's; the log rebuilt to
+`i35OIgqu…`, §18's root; `failures: 0`.
+
+**The interim set retired**, as the author decided on 2026-10-02 (§24,
+option 4). `OIDS_EXPERIMENTAL_47_5` leaves `KNOWN_OID_SETS`, the crate's
+exports and `interop`'s `-oids`. The two remaining sets, IANA and `-06`,
+each have their own `id-alg-mtcProof`, name attribute and CA extension, so a
+CA certificate now fixes the exact set; the comparison of §25 stays on the
+attribute alone, since a later certificate format may come with a new
+algorithm on the same CA. The interim corpus, `tests/vectors/interop-plants-07/`,
+is kept as a record: its CA certificate (which reads as `-06`) and its log
+and checkpoint are still read and checked, and its certificates must now be
+refused whole, the 21 the Go verifier accepted as `NotAnMtcCertificate`,
+under its own CA certificate and under the IANA corpus's (a new test). The
+IANA corpus under the interim corpus's CA certificate is still refused as
+`UnknownIssuer`, §25's demonstration with real data. What is lost, and said:
+§14's measurement can no longer be repeated with this crate after this
+commit; a commit from before §26 can. `interop verify` of the interim
+corpus's `cert_10_0.pem` under its own CA certificate prints `Proof(NotAnMtcCertificate)`.
+Updated: the documentation of `der.rs` and `lib.rs`, README sections 3 and
+7 and its timeline, `interop/README.md`, the interim corpus's README and the
+module documentation of `tests/interop_corpus.rs`.
+
+**Falsified.** With the interim set put back into `KNOWN_OID_SETS`, the unit
+test of the sets (no two share a name attribute or a CA extension; the
+interim `id-alg-mtcProof` names no set) and the refusal of the interim
+corpus both fail. Restored.
+
+**The pull requests for #341 and #342**, prepared on `6c5896d` in a clone of
+the draft's repository, as the author's commits, for him to send:
+
+- #341, "demo: write checkpoint cosignatures in the tlog-cosignature form".
+  `tlog-cosignature@v1.1.0`, the version the draft now cites, defines a
+  checkpoint cosignature as the timestamp, eight bytes big-endian, followed
+  by the signature over a `CosignedSubtree` carrying the same timestamp; a
+  subtree cosignature has none. The demo wrote a subtree cosignature over
+  `[0, size)` into its checkpoint. The patch adds `SignCheckpoint`, used for
+  the checkpoint with the time of generation; `Sign`, for the cosignatures
+  in certificates, is unchanged; before `plants-04` the message has no
+  timestamp and the bare signature is kept. A new Go test,
+  `TestCheckpointCosignature`, fails without the timestamp on the line;
+  `gofmt`, `go vet` and `go test ./...` are clean. Checked by two other
+  implementations: `filippo.io/torchwood` v0.10.0 (its
+  `CosignatureVerifier` with `note.Open`) refuses the checkpoint of the demo
+  at `draft-07` ("invalid signature for key oid/1.3.6.1.4.1.32473.1+e5375464")
+  and accepts the patched one, and with another cosigner name finds no
+  verifiable signature; this crate's `run.sh` reads the patched checkpoint as
+  "a timestamped tlog-cosignature (C2SP form)", `failures: 0`.
+- #342, "demo: update policy.txt's trusted subtrees to match mtc.json". The
+  six `trusted-subtree` lines replaced by the landmark subtrees that `demo
+  generate -config mtc.json` outputs at `6c5896d` (that `mtc.json` says
+  `plants-06`), and the comment names the command. With the policy as it
+  ships, `demo verify` accepts 9 of 26 certificates, and 8 landmark-relative
+  ones fail with "trusted subtree hash mismatch"; with the new lines, 17 of
+  26: those 8 verify, and `cert_2035_2`, built with a flipped proof bit,
+  still fails as it was built to.
+
+Not sent: sending them is the author's. The state of the two issues on
+GitHub was not read (this session has no API access to that repository);
+`demo/` unchanged since `38014f7` says that neither is fixed in the code.
+
+**Not measured again here.** OpenSSL's pull request and Bob Beck's `mtc`
+have moved since §19 and §21 (`7bd37b7` and `0fe8a6e`, against `ecf0476`
+and `c6cdfe2`).
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo doc --no-deps`: no warnings ·
+`cargo test`: 73/0 (72 before: the cross-corpus test of §25 becomes two) ·
+without `ml-dsa`: 56/0. `interop/run-openssl.sh`, with OpenSSL at `ecf0476` and `mtc` at
+`c6cdfe2` as in §19: `failures: 0`, the known difference unchanged.
+
+**What it does not close.** The two pull requests, which are the author's to
+send; the measurement against OpenSSL and `mtc` at their new heads; the
+`CosignedSubtree` rename.
+
+**Lesson.** Retiring a set turned a corpus that proved agreement into one
+that proves refusal; the files did not change, the test that reads them
+says what they now mean.

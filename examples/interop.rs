@@ -7,7 +7,7 @@
 //! has the procedure; `AUDIT.md` the record of each run.
 //!
 //!     cargo run --release --example interop -- generate -out DIR \
-//!         [-oids iana|experimental-47.5|experimental-06] [-tls-key PUBLIC_KEY_PEM]
+//!         [-oids iana|experimental-06] [-tls-key PUBLIC_KEY_PEM]
 //!     cargo run --release --example interop -- verify -ca-cert FILE \
 //!         [-policy FILE] [-subtrees FILE] [-cosigner-cert FILE]... \
 //!         [-require ID]... [-now UNIX] CERT...
@@ -79,7 +79,7 @@ fn main() -> ExitCode {
         Some("checkpoint") => checkpoint(&args[1..]),
         _ => {
             eprintln!(
-                "usage:\n  interop generate -out DIR [-oids iana|experimental-47.5|experimental-06] [-tls-key PUBLIC_KEY_PEM]\n  interop verify -ca-cert FILE [-policy FILE] [-subtrees FILE] [-cosigner-cert FILE]... [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
+                "usage:\n  interop generate -out DIR [-oids iana|experimental-06] [-tls-key PUBLIC_KEY_PEM]\n  interop verify -ca-cert FILE [-policy FILE] [-subtrees FILE] [-cosigner-cert FILE]... [-require ID]... [-now UNIX] CERT...\n  interop checkpoint -dir DIR -ca-cert FILE [-log-number N]"
             );
             return ExitCode::from(2);
         }
@@ -228,7 +228,7 @@ fn generate(args: &[String]) -> Res<()> {
             "-oids" => {
                 let v = flag_value(args, &mut i, "-oids")?;
                 oids = mtc_core::OidSet::from_flag(v).ok_or_else(|| {
-                    format!("-oids {v:?}: iana, experimental-47.5 or experimental-06")
+                    format!("-oids {v:?}: iana or experimental-06 (the interim experimental-47.5 was retired at draft-07, AUDIT.md §26)")
                 })?
             }
             other => return Err(format!("unknown flag {other}")),

@@ -29,10 +29,12 @@ pub const ARC_MTC_EXPERIMENTAL: [u64; 8] = [1, 3, 6, 1, 4, 1, 44363, 47];
 ///
 /// Three sets have been on the wire, and the draft repository's
 /// `draft_oids.md` and its `demo/` are the record of each:
-/// [`OIDS_IANA`], assigned in September 2026 and in the working copy since
-/// the commit "We have PKIX OIDs!"; [`OIDS_EXPERIMENTAL_06`], `plants-06`;
-/// and [`OIDS_EXPERIMENTAL_47_5`], the interim one the working copy used
-/// between them, which is the set of the corpus of AUDIT.md §14.
+/// [`OIDS_IANA`], assigned in September 2026, in the working copy since the
+/// commit "We have PKIX OIDs!" and in `draft-07`; [`OIDS_EXPERIMENTAL_06`],
+/// `plants-06`; and an interim one (`…47.5`, `…47.3`, `…47.4`) that the
+/// working copy used between them for a day, the set of the corpus of
+/// AUDIT.md §14. That one was in no published draft, and its CA certificates
+/// could not be told from `plants-06`'s; it is not read any more (§26).
 ///
 /// A CA emits one set ([`crate::CaConfig::oids`]). A relying party accepts
 /// the [`KNOWN_OID_SETS`], **one set per certificate**: the issuer's
@@ -65,19 +67,11 @@ pub const OIDS_EXPERIMENTAL_06: OidSet = OidSet {
     mtc_ca_sha256: &[1, 3, 6, 1, 4, 1, 44363, 47, 4],
 };
 
-/// The interim experimental set: `…47.5`, `…47.3`, `…47.4`. `draft_oids.md`
-/// lists `…47.5` as "starting draft plants-07"; the reference tool emitted it
-/// for `-version plants-07` until the IANA assignment replaced it.
-pub const OIDS_EXPERIMENTAL_47_5: OidSet = OidSet {
-    name: "experimental (interim: 47.5, 47.3, 47.4)",
-    mtc_proof: &[1, 3, 6, 1, 4, 1, 44363, 47, 5],
-    rdna_trust_anchor_id: &[1, 3, 6, 1, 4, 1, 44363, 47, 3],
-    mtc_ca_sha256: &[1, 3, 6, 1, 4, 1, 44363, 47, 4],
-};
-
-/// The sets a relying party accepts, in this order. Each has its own
-/// `id-alg-mtcProof`, so a certificate's signature algorithm names its set.
-pub const KNOWN_OID_SETS: [OidSet; 3] = [OIDS_IANA, OIDS_EXPERIMENTAL_47_5, OIDS_EXPERIMENTAL_06];
+/// The sets a relying party accepts. Each has its own `id-alg-mtcProof`, so
+/// a certificate's signature algorithm names its set; and its own name
+/// attribute and CA extension, so a CA certificate names exactly one
+/// (AUDIT.md §26).
+pub const KNOWN_OID_SETS: [OidSet; 2] = [OIDS_IANA, OIDS_EXPERIMENTAL_06];
 
 impl OidSet {
     /// The set whose `id-alg-mtcProof` `AlgorithmIdentifier` is exactly
@@ -88,11 +82,9 @@ impl OidSet {
             .find(|s| algorithm_identifier(s.mtc_proof) == alg_id)
     }
 
-    /// The set a CA certificate's extension names. The two experimental sets
-    /// share the extension and the name attribute, so a CA certificate cannot
-    /// tell them apart; it reads as [`OIDS_EXPERIMENTAL_06`], where both were
-    /// defined, and only its `mtc_ca_sha256` and `rdna_trust_anchor_id` are
-    /// meaningful.
+    /// The set a CA certificate's extension names. Each known set has its
+    /// own extension, so the CA certificate fixes the set (AUDIT.md §26;
+    /// before, an interim set shared `plants-06`'s extension and attribute).
     pub fn from_mtc_ca_extension(arcs: &[u64]) -> Option<OidSet> {
         if arcs == OIDS_IANA.mtc_ca_sha256 {
             Some(OIDS_IANA)
@@ -106,22 +98,21 @@ impl OidSet {
     /// Whether names in `other` use the same trust anchor ID attribute: what
     /// X.509 name chaining compares between a certificate's issuer and its
     /// CA's subject, beyond the CA ID itself. Nothing else is compared.
-    /// `id-alg-mtcProof` is not in a CA certificate, so the two experimental
-    /// sets are alike here, and a later certificate format may come with a
-    /// new signature algorithm on the same CA; the Merkle Tree CA extension
-    /// is the CA's own (its hash and tree construction), and a certificate
-    /// does not carry it (AUDIT.md §24, §25).
+    /// `id-alg-mtcProof` is not in a CA certificate, and a later certificate
+    /// format may come with a new signature algorithm on the same CA; the
+    /// Merkle Tree CA extension is the CA's own (its hash and tree
+    /// construction), and a certificate does not carry it (AUDIT.md §24,
+    /// §25). Among the [`KNOWN_OID_SETS`] the attribute names one set.
     pub fn same_name_attribute(&self, other: &OidSet) -> bool {
         self.rdna_trust_anchor_id == other.rdna_trust_anchor_id
     }
 
-    /// Parse a name for `-oids` on a command line: `iana`, `experimental-06`
-    /// or `experimental-47.5`.
+    /// Parse a name for `-oids` on a command line: `iana` or
+    /// `experimental-06`.
     pub fn from_flag(s: &str) -> Option<OidSet> {
         match s {
             "iana" => Some(OIDS_IANA),
             "experimental-06" => Some(OIDS_EXPERIMENTAL_06),
-            "experimental-47.5" => Some(OIDS_EXPERIMENTAL_47_5),
             _ => None,
         }
     }
@@ -688,7 +679,7 @@ mod tests {
             hex(&oid(OIDS_EXPERIMENTAL_06.rdna_trust_anchor_id)),
             "060a2b0601040182da4b2f03"
         );
-        assert_eq!(ca_id_from_name(&old, &OIDS_EXPERIMENTAL_47_5).unwrap(), ca);
+        assert_eq!(ca_id_from_name(&old, &OIDS_EXPERIMENTAL_06).unwrap(), ca);
         // One set per name: the attribute of another set is not a CA ID.
         assert_eq!(
             ca_id_from_name(&old, &OIDS_IANA),
@@ -702,15 +693,20 @@ mod tests {
 
     #[test]
     fn a_ca_is_matched_by_its_name_attribute_alone() {
-        // The two experimental sets differ only in `id-alg-mtcProof`.
-        assert!(OIDS_EXPERIMENTAL_47_5.same_name_attribute(&OIDS_EXPERIMENTAL_06));
         assert!(!OIDS_IANA.same_name_attribute(&OIDS_EXPERIMENTAL_06));
-        assert!(!OIDS_EXPERIMENTAL_47_5.same_name_attribute(&OIDS_IANA));
+        assert!(!OIDS_EXPERIMENTAL_06.same_name_attribute(&OIDS_IANA));
         for s in KNOWN_OID_SETS {
             assert!(s.same_name_attribute(&s));
         }
-        // Built by hand, to tell the attribute from the CA extension: only
-        // the attribute counts (AUDIT.md §25).
+        // Built by hand. Another signature algorithm on the same CA (a later
+        // certificate format) is not refused here (AUDIT.md §24) ...
+        let other_alg = OidSet {
+            mtc_proof: &[1, 3, 6, 1, 4, 1, 44363, 47, 5],
+            ..OIDS_EXPERIMENTAL_06
+        };
+        assert!(other_alg.same_name_attribute(&OIDS_EXPERIMENTAL_06));
+        // ... and, to tell the attribute from the CA extension, only the
+        // attribute counts (§25).
         let iana_ext = OidSet {
             mtc_ca_sha256: OIDS_EXPERIMENTAL_06.mtc_ca_sha256,
             ..OIDS_IANA
@@ -741,13 +737,21 @@ mod tests {
             Some(OIDS_IANA)
         );
         assert_eq!(
-            OidSet::from_mtc_ca_extension(OIDS_EXPERIMENTAL_47_5.mtc_ca_sha256),
+            OidSet::from_mtc_ca_extension(OIDS_EXPERIMENTAL_06.mtc_ca_sha256),
             Some(OIDS_EXPERIMENTAL_06)
         );
-        assert_eq!(
-            OidSet::from_flag("experimental-47.5"),
-            Some(OIDS_EXPERIMENTAL_47_5)
-        );
+        // A CA certificate names exactly one known set: no two share the
+        // name attribute or the CA extension (AUDIT.md §26).
+        for (i, a) in KNOWN_OID_SETS.iter().enumerate() {
+            for b in &KNOWN_OID_SETS[i + 1..] {
+                assert_ne!(a.rdna_trust_anchor_id, b.rdna_trust_anchor_id);
+                assert_ne!(a.mtc_ca_sha256, b.mtc_ca_sha256);
+            }
+        }
+        // The interim `id-alg-mtcProof`, retired at `draft-07`, names no set.
+        let interim = algorithm_identifier(&[1, 3, 6, 1, 4, 1, 44363, 47, 5]);
+        assert_eq!(OidSet::from_mtc_proof_alg(&interim), None);
+        assert_eq!(OidSet::from_flag("experimental-47.5"), None);
         assert_eq!(OidSet::from_flag("47.5"), None);
     }
 

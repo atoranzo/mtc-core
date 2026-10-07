@@ -4,12 +4,14 @@
 plants-07` at commit `99097c9e`, which wrote the interim experimental OID set:
 `id-alg-mtcProof` `…44363.47.5` with `…47.3` and `…47.4`. The same day, commit
 `ad4256b` ("We have PKIX OIDs!") switched `plants-07` to the IANA-assigned OIDs,
-and no tool writes this set any more. It is kept because it is what AUDIT.md
-§14 and §15 measured, and because a relying party here still accepts it
-(`der::OIDS_EXPERIMENTAL_47_5`) under a CA certificate of the experimental
-OIDs, such as this corpus's own; under the IANA corpus's, with the same CA ID
-and key, it refuses every certificate (AUDIT.md §25). The IANA corpus is
-`../interop-iana/`.
+and no tool writes this set any more; no published draft ever used it. It
+is kept because it is what AUDIT.md §14 and §15 measured, and as a record.
+Since `draft-07` this crate no longer reads its OIDs (AUDIT.md §26): its
+`id-alg-mtcProof` names no known set, so every certificate here is refused
+(`NotAnMtcCertificate`), and `tests/interop_corpus.rs` checks exactly that.
+Its CA certificate (which reads as the `plants-06` set, the two sharing
+their CA-level OIDs) and its log and checkpoint are still read and checked.
+The IANA corpus is `../interop-iana/`.
 
 Everything in this directory except this file and `expected.txt` is the
 output of the draft's reference implementation, unchanged:
@@ -23,7 +25,8 @@ output of the draft's reference implementation, unchanged:
   `"Version": "plants-06"` → `"plants-07"`. In the demo, the only difference
   between the two is the `id-alg-mtcProof` OID (`…47.0` for plants-06,
   `…47.5` from plants-07; see `draft_oids.md` in that repository). This
-  crate encodes `…47.5`, so `plants-07` is the version it interoperates with.
+  crate encoded `…47.5` then, so `plants-07` was the version it
+  interoperated with (until §18; retired in §26).
 - Command: `./demo generate -config mtc.json -out .`
 - `ca_cert.pem`: the CA certificate (unsigned, RFC 9925), CA ID `32473.1`,
   ML-DSA-44.
@@ -43,8 +46,9 @@ output of the draft's reference implementation, unchanged:
   ca_cert.pem -policy policy.txt cert_*.pem`, one line per file, `OK` or
   `FAIL`.
 
-`tests/interop_corpus.rs` requires this crate's verifier to give the same
-26 verdicts, checks the negatives fail for the reason they were built for,
-checks that each corpus is refused under the other's CA certificate,
-rebuilds the log from the tiles and checks the checkpoint's root and the
-CA's signature line.
+`tests/interop_corpus.rs` required this crate's verifier to give the same
+26 verdicts until §26; now it requires every certificate here to be refused,
+the 21 the Go verifier accepted as `NotAnMtcCertificate`, under this
+corpus's CA certificate and the IANA corpus's. It still reads the CA
+certificate, rebuilds the log from the tiles and checks the checkpoint's
+root and the CA's signature line.

@@ -414,9 +414,6 @@ mod tests {
         ca.oids = der::OIDS_EXPERIMENTAL_06;
         let der_exp = ca.to_der().unwrap();
         assert_eq!(CaCertificate::from_der(&der_exp).unwrap(), ca);
-        // The interim set writes the same two OIDs, and reads as plants-06.
-        ca.oids = der::OIDS_EXPERIMENTAL_47_5;
-        assert_eq!(ca.to_der().unwrap(), der_exp);
         // The IANA extension over an experimental subject: not a CA ID name
         // under the extension's set.
         let iana = sample().to_der().unwrap();

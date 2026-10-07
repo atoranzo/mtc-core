@@ -5,10 +5,13 @@
 //! (Go, `-version plants-07`, before and after the tool switched to the
 //! IANA-assigned OIDs; the provenance is in each README), plus the verdict
 //! the Go verifier gave to each certificate. This test hands the same files to this crate's
-//! verifier and requires the same verdicts, negative cases included, and
-//! the refusal of each corpus under the other's CA certificate; then it
-//! rebuilds the issuance log from the Go tool's entry tiles and checks its
-//! signed checkpoint. No Go is needed to run it: the corpus is data.
+//! verifier and requires the same verdicts for the IANA corpus, negative
+//! cases included; the refusal of the IANA corpus under the interim
+//! corpus's CA certificate; and the refusal of the whole interim corpus,
+//! whose OIDs were retired at `draft-07` (AUDIT.md §26). Then, for both, it
+//! reads the CA certificate, rebuilds the issuance log from the Go tool's
+//! entry tiles and checks its signed checkpoint. No Go is needed to run it:
+//! the corpus is data.
 //!
 //! What it does NOT cover: the other direction (certificates from here
 //! verified by the Go tool), which needs Go and runs from
@@ -31,22 +34,21 @@ use mtc_core::{pem, IssuanceLog, Subtree, TrustAnchorId, VerifyError};
 const NOW: u64 = 1_790_000_000;
 
 /// The two corpora of the reference tool: the interim experimental OIDs of
-/// AUDIT.md §14, and the IANA OIDs of §18. Same configuration, same verdicts.
+/// AUDIT.md §14, and the IANA OIDs of §18, with the same configuration. The
+/// interim set was retired at `draft-07` (§26): only the IANA corpus is
+/// accepted now, and the interim one is kept for its CA certificate and its
+/// log, and as a corpus that must be refused whole.
 struct Corpus {
     dir: &'static str,
-    oids: mtc_core::OidSet,
 }
 
-const CORPORA: [Corpus; 2] = [
-    Corpus {
-        dir: "interop-plants-07",
-        oids: mtc_core::OIDS_EXPERIMENTAL_47_5,
-    },
-    Corpus {
-        dir: "interop-iana",
-        oids: mtc_core::OIDS_IANA,
-    },
-];
+const INTERIM: Corpus = Corpus {
+    dir: "interop-plants-07",
+};
+const IANA: Corpus = Corpus {
+    dir: "interop-iana",
+};
+const CORPORA: [Corpus; 2] = [INTERIM, IANA];
 
 fn dir(c: &Corpus) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -149,12 +151,7 @@ fn the_ca_certificate_of_the_go_tool_is_read_and_its_key_is_the_documented_seed_
 
 #[test]
 fn every_verdict_of_the_go_verifier_is_reproduced() {
-    for c in &CORPORA {
-        every_verdict_of_the_go_verifier_is_reproduced_in(c);
-    }
-}
-
-fn every_verdict_of_the_go_verifier_is_reproduced_in(c: &Corpus) {
+    let c = &IANA;
     let ca = ca(c);
     let rp = relying_party(c, &ca);
     let mut checked = 0;
@@ -169,51 +166,65 @@ fn every_verdict_of_the_go_verifier_is_reproduced_in(c: &Corpus) {
                 "{name}: serial outside the CA's range"
             );
             assert_eq!(v.log_number, 1);
-            assert_eq!(v.oids, c.oids, "{name}: written with another OID set");
+            assert_eq!(
+                v.oids,
+                mtc_core::OIDS_IANA,
+                "{name}: written with another OID set"
+            );
         }
         checked += 1;
     }
     assert_eq!(checked, 26);
 }
 
-/// A CA certificate fixes the issuer's name attribute (AUDIT.md §25). The
-/// two corpora share the CA ID `32473.1` and its key; under the other
-/// corpus's CA certificate and policy, every certificate fails, and the 21
-/// its own CA accepts fail as `UnknownIssuer`. Before §25, twelve of them
-/// verified (the cosigned ones whose subtree is not one of the other
-/// corpus's landmarks) and the rest failed as `TrustedSubtreeMismatch`.
-#[test]
-fn each_corpus_is_refused_under_the_other_corpus_ca_certificate() {
-    for (own, other) in [(&CORPORA[0], &CORPORA[1]), (&CORPORA[1], &CORPORA[0])] {
-        let other_ca = ca(other);
-        let rp = relying_party(other, &other_ca);
-        let mut refused = 0;
-        for line in read(own, "expected.txt").lines() {
-            let (name, expected) = line.split_once(' ').unwrap();
-            let result = verify_certificate(&certificate_der(own, name), &rp, NOW);
-            assert!(result.is_err(), "{}/{name}: {result:?}", own.dir);
-            if expected == "OK" {
-                assert_eq!(
-                    result,
-                    Err(VerifyError::UnknownIssuer),
-                    "{}/{name}",
-                    own.dir
-                );
-                refused += 1;
-            }
+/// Every certificate of `corpus`, under the CA certificate and policy of
+/// `config`, must fail; those the Go verifier accepted (21) with `expected`.
+fn refused_whole(corpus: &Corpus, config: &Corpus, expected: VerifyError) {
+    let config_ca = ca(config);
+    let rp = relying_party(config, &config_ca);
+    let mut refused = 0;
+    for line in read(corpus, "expected.txt").lines() {
+        let (name, go) = line.split_once(' ').unwrap();
+        let result = verify_certificate(&certificate_der(corpus, name), &rp, NOW);
+        assert!(result.is_err(), "{}/{name}: {result:?}", corpus.dir);
+        if go == "OK" {
+            assert_eq!(result, Err(expected.clone()), "{}/{name}", corpus.dir);
+            refused += 1;
         }
-        assert_eq!(refused, 21, "{}", own.dir);
+    }
+    assert_eq!(refused, 21, "{} under {}", corpus.dir, config.dir);
+}
+
+/// A CA certificate fixes the issuer's name attribute (AUDIT.md §25). The
+/// two corpora share the CA ID `32473.1` and its key; under the interim
+/// corpus's CA certificate (experimental OIDs) and policy, every IANA
+/// certificate fails, the 21 the Go verifier accepted as `UnknownIssuer`.
+/// Before §25, twelve of them verified (the cosigned ones whose subtree is
+/// not one of the other corpus's landmarks) and the rest failed as
+/// `TrustedSubtreeMismatch`.
+#[test]
+fn the_iana_corpus_is_refused_under_the_interim_corpus_ca_certificate() {
+    refused_whole(&IANA, &INTERIM, VerifyError::UnknownIssuer);
+}
+
+/// The interim OIDs were retired at `draft-07` (AUDIT.md §26): its
+/// `id-alg-mtcProof`, `…47.5`, names no known set, so none of its
+/// certificates is an MTC certificate here, under its own CA certificate or
+/// the IANA corpus's. Until §26 the 21 verified under their own.
+#[test]
+fn the_interim_corpus_is_refused_now_that_its_oids_are_retired() {
+    for config in [&INTERIM, &IANA] {
+        refused_whole(
+            &INTERIM,
+            config,
+            VerifyError::Proof(ProofError::NotAnMtcCertificate),
+        );
     }
 }
 
 #[test]
 fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for() {
-    for c in &CORPORA {
-        the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for_in(c);
-    }
-}
-
-fn the_negative_cases_fail_for_the_reason_the_go_tool_built_them_for_in(c: &Corpus) {
+    let c = &IANA;
     let ca = ca(c);
     let rp = relying_party(c, &ca);
     let verdict = |name: &str| verify_certificate(&certificate_der(c, name), &rp, NOW);

@@ -4,9 +4,10 @@ The natural interoperability target of this crate is `demo/` in the PLANTS
 working group's repository, <https://github.com/ietf-plants-wg/merkle-tree-certs>:
 a generator and a verifier in Go for the current design. This directory
 holds the procedure; `AUDIT.md` holds the record of each run, and
-`tests/vectors/interop-iana/` (and, for the interim OIDs of §14,
-`tests/vectors/interop-plants-07/`) holds the Go tool's corpus with its
-verdicts so that one direction runs offline in `cargo test`.
+`tests/vectors/interop-iana/` holds the Go tool's corpus with its verdicts
+so that one direction runs offline in `cargo test` (the corpus of the
+interim OIDs of §14, `tests/vectors/interop-plants-07/`, is kept, and since
+§26 it must be refused whole).
 
 ## What is measured
 
@@ -37,10 +38,12 @@ Since the draft repository's commit `ad4256b` ("We have PKIX OIDs!",
 `1.3.6.1.5.5.7.25.3`, `id-pe-mtcCertificationAuthority-SHA256`
 `1.3.6.1.5.5.7.1.38`), which is what this crate's CA writes by default. So
 every command below says `-version plants-07`, the generator's configuration
-says `"Version": "plants-07"`, and the demo has to be at `ad4256b` or later.
-Before it, the same version string meant the interim experimental set
-(`…44363.47.5`, `.47.3`, `.47.4`): to measure against such a demo, run
-`interop generate -oids experimental-47.5`. With `plants-06` the Go verifier
+says `"Version": "plants-07"`, and the demo has to be at `ad4256b` or later;
+the tag `draft-ietf-plants-merkle-tree-certs-07` (`6c5896d`, 2026-10-07) is
+such a commit. Before `ad4256b` the same version string meant the interim
+experimental set (`…44363.47.5`, `.47.3`, `.47.4`), which this crate no
+longer reads (AUDIT.md §26); a demo of that time can be measured only with
+a commit of this crate from before §26. With `plants-06` the Go verifier
 rejects every certificate from here by design: its OIDs are another set.
 
 ## Requirements

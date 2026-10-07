@@ -13,7 +13,7 @@ use mtc_core::verify::{
 };
 use mtc_core::{
     CaConfig, CertificateRequest, CertificationAuthority, MemoryGuard, OidSet, Subtree,
-    TrustAnchorId, Validity, OIDS_EXPERIMENTAL_06, OIDS_EXPERIMENTAL_47_5, OIDS_IANA,
+    TrustAnchorId, Validity, OIDS_EXPERIMENTAL_06, OIDS_IANA,
 };
 
 const NOW: u64 = 1_800_000_000;
@@ -303,16 +303,13 @@ fn a_certificate_that_mixes_oid_sets_is_refused() {
 /// use the same trust anchor ID attribute: a relying party configured for a
 /// CA of one family refuses a certificate of the other family under the same
 /// CA ID, although its proof and cosignatures are good; path validation
-/// chains names, and a name includes its attribute's type. The experimental
-/// `-06` and interim `.47.5` sets are one family: a CA certificate cannot
-/// tell them apart.
+/// chains names, and a name includes its attribute's type. Since the
+/// interim set was retired (§26), each family is one set.
 #[test]
 fn a_certificate_of_another_family_is_refused_under_the_same_ca_id() {
     for (issued, configured, accepted) in [
         (OIDS_EXPERIMENTAL_06, OIDS_IANA, false),
-        (OIDS_EXPERIMENTAL_47_5, OIDS_IANA, false),
         (OIDS_IANA, OIDS_EXPERIMENTAL_06, false),
-        (OIDS_EXPERIMENTAL_47_5, OIDS_EXPERIMENTAL_06, true),
         (OIDS_EXPERIMENTAL_06, OIDS_EXPERIMENTAL_06, true),
         (OIDS_IANA, OIDS_IANA, true),
     ] {

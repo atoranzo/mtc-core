@@ -151,6 +151,7 @@ so row by row.
 | 2026-09-21 | `draft-ietf-plants-merkle-tree-certs-06`; this crate is written against the working repository as of 2026-09-29; first with its interim experimental OIDs (`…47.5` for `id-alg-mtcProof`), and since AUDIT.md §18 with the IANA-assigned ones the working copy adopted that day (`1.3.6.1.5.5.7.6.67`, `.25.3`, `.1.38`), which are what the reference tool's `-version plants-07` writes now | git tag | confirmed |
 | 2026-09-29 | Cloudflare announces its public CA and "Building a post-quantum certificate authority with Merkle Tree Certificates": experiment with 50 % of Chrome Beta 146, first MTCs in the first quarter of 2027 | blog.cloudflare.com | confirmed (day from snippets) |
 | 2026-09-29 | Spanish press coverage of the Cloudflare announcement; the 20minutos headline matches that hook | infobae.com (same day) | unverified |
+| 2026-10-07 | `draft-ietf-plants-merkle-tree-certs-07`, with the IANA-assigned OIDs; its `demo/` is the one measured in AUDIT.md §18, and this crate measures against it and stops reading the interim set (§26) | git tag `-07` (`6c5896d`) | confirmed |
 
 **Corrections to the starting note:**
 
@@ -544,11 +545,12 @@ per version, one ledger entry per change) and none of the STARK code.
 
 - **It is not audited.** Neither this code, nor `ml-dsa` (its own crate says
   so), nor `hbs-state`. The OIDs are the IANA-assigned ones by default
-  (`CaConfig::oids`), and a relying party here also accepts the two
-  experimental sets of the `1.3.6.1.4.1.44363.47` arc that have been on the
-  wire (AUDIT.md §18), one set per certificate and each under a CA whose
-  name uses the same attribute (§22, §25); the draft may still change: the version read is the PLANTS working group's working repository as
-  of September 29, 2026. It did pass an internal adversarial review (six
+  (`CaConfig::oids`), and a relying party here also accepts the
+  experimental set of `plants-06` (`1.3.6.1.4.1.44363.47` arc, AUDIT.md §18;
+  the interim `.47.5` set was retired at `draft-07`, §26), one set per
+  certificate and each under a CA whose name uses the same attribute (§22,
+  §25). The version read is `draft-07` (2026-10-07), and the draft may still
+  change before it is an RFC. It did pass an internal adversarial review (six
   reviewers per dimension, one skeptic per finding) against the draft, the
   reference implementation and the C2SP specifications; what was confirmed is
   corrected and covered by tests, and that is no substitute for an audit.
