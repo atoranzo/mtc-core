@@ -1352,9 +1352,21 @@ the draft's repository, as the author's commits, for him to send:
   ships, `demo verify` accepts 9 of 26 certificates, and 8 landmark-relative
   ones fail with "trusted subtree hash mismatch"; with the new lines, 17 of
   26: those 8 verify, and `cert_2035_2`, built with a flipped proof bit,
-  still fails as it was built to.
+  still fails as it was built to. **Overtaken the same day:** fifteen
+  minutes after the tag, David Benjamin's `bc93fb6` ("Bump demo default to
+  plants-07") moved `mtc.json` to `plants-07` and rewrote the six lines.
+  Checked: they equal what `demo generate -config mtc.json` outputs at
+  `bc93fb6`, and `demo verify` accepts 17 of 26 there, `cert_2035_2` the only
+  trusted-subtree mismatch. #342 is fixed upstream; this pull request is
+  dropped.
 
-Not sent: sending them is the author's. The state of the two issues on
+#341's branch was then moved onto `bc93fb6` (commit `0587ec7`), which does
+not touch the checkpoint code, and checked again: `go test ./...` clean;
+`torchwood` refuses the checkpoint of `bc93fb6` and accepts the patched
+one; this crate's `run.sh` reads it as a timestamped tlog-cosignature,
+`failures: 0`.
+
+Not sent: sending it is the author's. The state of the two issues on
 GitHub was not read (this session has no API access to that repository);
 `demo/` unchanged since `38014f7` says that neither is fixed in the code.
 
@@ -1368,9 +1380,20 @@ and `c6cdfe2`).
 without `ml-dsa`: 56/0. `interop/run-openssl.sh`, with OpenSSL at `ecf0476` and `mtc` at
 `c6cdfe2` as in §19: `failures: 0`, the known difference unchanged.
 
-**What it does not close.** The two pull requests, which are the author's to
-send; the measurement against OpenSSL and `mtc` at their new heads; the
-`CosignedSubtree` rename.
+**On the author's machine**, at `6dd47a6`, 2026-10-07 (WSL2, rustc 1.97.1,
+Go 1.27.1): `cargo fmt --check` and `cargo clippy --all-targets -- -D
+warnings` clean; `cargo test` 73/0 (50 + 7 + 1 + 6 + 2 + 7); without
+`ml-dsa` 56/0 (46 + 1 + 2 + 7). `interop/run.sh` at 18:39:07 UTC against the
+draft repository's `main`, which his pull brought to `bc93fb6`, one commit
+after the tag (built by the script, no tracked changes): 26/26, 9/9 with
+both CA certificates, the log rebuilt to `i35OIgqu…`, `failures: 0`; the
+demo's change of default version does not reach `run.sh`, which passes its
+own configuration and `-version`. `interop/run-openssl.sh`: `failures: 0`,
+the known difference unchanged.
+
+**What it does not close.** The pull request for #341, which is the
+author's to send; the measurement against OpenSSL and `mtc` at their new
+heads; the `CosignedSubtree` rename.
 
 **Lesson.** Retiring a set turned a corpus that proved agreement into one
 that proves refusal; the files did not change, the test that reads them
