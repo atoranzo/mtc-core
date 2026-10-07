@@ -1366,7 +1366,15 @@ not touch the checkpoint code, and checked again: `go test ./...` clean;
 one; this crate's `run.sh` reads it as a timestamped tlog-cosignature,
 `failures: 0`.
 
-Not sent: sending it is the author's. The state of the two issues on
+**Sent** by the author on 2026-10-07 from his fork, `atoranzo/merkle-tree-certs`,
+as `ietf-plants-wg/merkle-tree-certs#355` ("demo: write checkpoint
+cosignatures in the tlog-cosignature form"), one commit, `bfb754f`, with
+the description above and "Fixes #341". The branch was first pushed as
+`0587ec7`, whose committer was this session's identity (the rebase onto
+`bc93fb6` had taken it from the environment) and which carried the
+environment's signature; it was replaced, before the pull request was
+opened, by `bfb754f`, the same tree with the author as author and
+committer and no signature. The state of the two issues on
 GitHub was not read (this session has no API access to that repository);
 `demo/` unchanged since `38014f7` says that neither is fixed in the code.
 
@@ -1391,9 +1399,8 @@ demo's change of default version does not reach `run.sh`, which passes its
 own configuration and `-version`. `interop/run-openssl.sh`: `failures: 0`,
 the known difference unchanged.
 
-**What it does not close.** The pull request for #341, which is the
-author's to send; the measurement against OpenSSL and `mtc` at their new
-heads; the `CosignedSubtree` rename.
+**What it does not close.** The review of #355; the measurement against
+OpenSSL and `mtc` at their new heads; the `CosignedSubtree` rename.
 
 **Lesson.** Retiring a set turned a corpus that proved agreement into one
 that proves refusal; the files did not change, the test that reads them
