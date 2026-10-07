@@ -32,7 +32,17 @@ pub struct TrustAnchorId {
 }
 
 /// `TrustAnchorID<1..2^8-1>`: the binary form is between 1 and 255 bytes.
+/// This is the bound of the MTC draft's wire format (`MTCProof`'s
+/// `cosigner_id`), and the only one applied to IDs read from there.
 pub const MAX_BINARY_LEN: usize = 255;
+/// draft-ietf-tls-trust-anchor-ids-06, Section 4: "The length of a trust
+/// anchor ID's binary representation MUST NOT exceed 32 bytes." The MTC
+/// draft makes the CA ID, the log IDs, the landmark and landmark group IDs
+/// and the cosigner IDs trust anchor IDs, so each one this crate configures
+/// or derives is held to it (AUDIT.md §27). An ID read from an `MTCProof`
+/// may be longer: it can then match no configured cosigner, and is ignored
+/// like any unrecognized one.
+pub const MAX_TRUST_ANCHOR_ID_LEN: usize = 32;
 /// `cosigner_name<1..2^8-1>` / `log_origin<1..2^8-1>`: the `oid/…` name
 /// is at most 255 bytes.
 pub const MAX_NAME_LEN: usize = 255;
@@ -43,6 +53,9 @@ pub enum TaiError {
     Empty,
     /// The binary representation does not fit in `TrustAnchorID<1..2^8-1>`.
     TooLong(usize),
+    /// Longer than [`MAX_TRUST_ANCHOR_ID_LEN`] bytes: valid on the MTC wire,
+    /// but not a trust anchor ID.
+    TooLongForTrustAnchor(usize),
     /// The `oid/…` name does not fit in `opaque<1..2^8-1>`.
     NameTooLong(usize),
     Der(DerError),
@@ -196,30 +209,54 @@ impl TrustAnchorId {
         Self::from_binary(&binary)
     }
 
-    /// `{caID logs(0) N}`: the ID of log `N`.
+    /// Whether the ID is short enough to be a trust anchor ID
+    /// ([`MAX_TRUST_ANCHOR_ID_LEN`]).
+    pub fn check_trust_anchor_len(&self) -> Result<(), TaiError> {
+        match self.binary.len() {
+            n if n > MAX_TRUST_ANCHOR_ID_LEN => Err(TaiError::TooLongForTrustAnchor(n)),
+            _ => Ok(()),
+        }
+    }
+
+    /// A derived ID, which the MTC draft makes a trust anchor ID.
+    fn trust_anchor_child(&self, more: &[u64]) -> Result<Self, TaiError> {
+        let id = self.child(more)?;
+        id.check_trust_anchor_len()?;
+        Ok(id)
+    }
+
+    /// `{caID logs(0) N}`: the ID of log `N`, a trust anchor ID.
     pub fn log_id(&self, log_number: u16) -> Result<Self, TaiError> {
-        self.child(&[0, log_number as u64])
+        self.trust_anchor_child(&[0, log_number as u64])
     }
 
-    /// `{caID landmarks(1) N L}`.
+    /// `{caID landmarks(1) N L}`, a trust anchor ID.
     pub fn landmark_id(&self, log_number: u16, landmark: u64) -> Result<Self, TaiError> {
-        self.child(&[1, log_number as u64, landmark])
+        self.trust_anchor_child(&[1, log_number as u64, landmark])
     }
 
-    /// `{caID landmarkGroups(2) N L}`.
+    /// `{caID landmarkGroups(2) N L}`, a trust anchor ID.
     pub fn landmark_group_id(&self, log_number: u16, landmark: u64) -> Result<Self, TaiError> {
-        self.child(&[2, log_number as u64, landmark])
+        self.trust_anchor_child(&[2, log_number as u64, landmark])
     }
 
-    /// Checks that the ID can serve as a CA ID: that all of its derived IDs
-    /// (log, landmark and group, with the longest possible values) fit on
-    /// the wire and in an `oid/…` name. Called when configuring a CA, so
-    /// that it fails at startup and not at issuance.
+    /// Checks that the ID can serve as a CA ID: that it is a trust anchor ID
+    /// ([`MAX_TRUST_ANCHOR_ID_LEN`]), and that its derived IDs, with the
+    /// longest possible values, fit on the wire and in an `oid/…` name.
+    /// Whether a given derived ID is itself short enough to be a trust anchor
+    /// ID is checked when it is derived: a CA ID of 32 bytes is valid, but
+    /// leaves no room for a log. Called when configuring a CA, when writing
+    /// or reading its certificate, and before each verification, so that it
+    /// fails there and not at issuance.
     pub fn check_as_ca_id(&self) -> Result<(), TaiError> {
+        self.check_trust_anchor_len()?;
+        // Defensive since §27: with at most 32 bytes the longest name is
+        // 16 + 127 + 29 = 172 characters ("127." per byte, then
+        // ".2.65535.18446744073709551615"), well within 255.
         self.oid_name()?;
-        self.log_id(u16::MAX)?.oid_name()?;
-        self.landmark_id(u16::MAX, u64::MAX)?.oid_name()?;
-        self.landmark_group_id(u16::MAX, u64::MAX)?.oid_name()?;
+        self.child(&[0, u16::MAX as u64])?.oid_name()?;
+        self.child(&[1, u16::MAX as u64, u64::MAX])?.oid_name()?;
+        self.child(&[2, u16::MAX as u64, u64::MAX])?.oid_name()?;
         Ok(())
     }
 }
@@ -327,17 +364,55 @@ mod tests {
     }
 
     #[test]
-    fn a_ca_id_that_leaves_no_room_for_its_children_is_rejected() {
+    fn a_long_ca_id_fails_on_its_length_before_its_names() {
+        // Before §27 this ID failed for leaving no room for its children's
+        // names; now its length stops it first.
         let long = TrustAnchorId::from_binary(&[0x7f; 255]).unwrap();
-        assert!(matches!(
+        assert_eq!(
             long.check_as_ca_id(),
-            Err(TaiError::NameTooLong(_)) | Err(TaiError::TooLong(_))
-        ));
+            Err(TaiError::TooLongForTrustAnchor(255))
+        );
+        // The name bound still holds for an ID read from the wire.
         let names_too_long = TrustAnchorId::from_binary(&[0x7f; 100]).unwrap(); // "127." x 100 = 400 chars
         assert!(matches!(
             names_too_long.oid_name(),
             Err(TaiError::NameTooLong(_))
         ));
+    }
+
+    /// AUDIT.md §27: trust anchor IDs are at most 32 bytes
+    /// (draft-ietf-tls-trust-anchor-ids-06, Section 4); the MTC wire format
+    /// still carries up to 255.
+    #[test]
+    fn trust_anchor_ids_are_at_most_32_bytes_and_the_wire_is_not() {
+        let id = |n: usize| TrustAnchorId::from_binary(&vec![1; n]).unwrap();
+        // The wire bound is unchanged: an MTCProof may carry 255 bytes.
+        assert_eq!(id(255).as_binary().len(), 255);
+        // A CA ID: 32 bytes is one, 33 is not.
+        assert_eq!(id(32).check_as_ca_id(), Ok(()));
+        assert_eq!(
+            id(33).check_as_ca_id(),
+            Err(TaiError::TooLongForTrustAnchor(33))
+        );
+        // Derived IDs are trust anchor IDs too. `{caID 0 1}` adds two bytes
+        // and `{caID 0 128}` three; `{caID 1 1 1}` and `{caID 2 1 1}` three.
+        assert_eq!(id(30).log_id(1).unwrap().as_binary().len(), 32);
+        assert_eq!(id(30).log_id(128), Err(TaiError::TooLongForTrustAnchor(33)));
+        assert_eq!(id(29).landmark_id(1, 1).unwrap().as_binary().len(), 32);
+        assert_eq!(
+            id(30).landmark_id(1, 1),
+            Err(TaiError::TooLongForTrustAnchor(33))
+        );
+        assert_eq!(
+            id(29).landmark_group_id(1, 1).unwrap().as_binary().len(),
+            32
+        );
+        assert_eq!(
+            id(30).landmark_group_id(1, 1),
+            Err(TaiError::TooLongForTrustAnchor(33))
+        );
+        // A CA ID of 32 bytes is valid, and leaves no room for a log.
+        assert_eq!(id(32).log_id(1), Err(TaiError::TooLongForTrustAnchor(34)));
     }
 
     #[test]

@@ -4,8 +4,10 @@
 
 use mtc_core::ca::CaError;
 use mtc_core::cosign::mldsa::{MlDsa44, MlDsaCosigner, MlDsaVerifier};
+use mtc_core::cosign::SubtreeSignature;
 use mtc_core::der;
 use mtc_core::guard::{is_fatal, GuardError, IndexGuard, Reconciliation};
+use mtc_core::tai::TaiError;
 
 use mtc_core::proof::MtcCertificate;
 use mtc_core::verify::{
@@ -340,6 +342,134 @@ fn a_certificate_of_another_family_is_refused_under_the_same_ca_id() {
             );
         }
     }
+}
+
+/// Trust anchor IDs are at most 32 bytes (AUDIT.md §27,
+/// draft-ietf-tls-trust-anchor-ids-06): a CA refuses a CA ID, a log ID or a
+/// cosigner ID that is longer. A relying party still reads an `MTCProof`
+/// whose cosigner IDs are longer, as the wire allows: such an ID matches no
+/// configured cosigner, and its cosignature is ignored.
+#[test]
+fn trust_anchor_ids_longer_than_32_bytes_are_refused_where_configured() {
+    let id = |n: usize| TrustAnchorId::from_binary(&vec![1; n]).unwrap();
+    let ca_with = |ca_id: TrustAnchorId| {
+        let cfg = CaConfig {
+            ca_id: ca_id.clone(),
+            log_number: 1,
+            max_cert_lifetime: WEEK,
+            oids: OIDS_IANA,
+        };
+        let signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id, [1u8; 32]);
+        CertificationAuthority::new(cfg, Box::new(signer), MemoryGuard::default())
+    };
+    // A CA ID of 33 bytes is not a trust anchor ID; one of 31 is, but its
+    // log 1, `{caID 0 1}`, would be 33 bytes.
+    assert!(matches!(
+        ca_with(id(33)).err(),
+        Some(CaError::Tai(TaiError::TooLongForTrustAnchor(33)))
+    ));
+    assert!(matches!(
+        ca_with(id(31)).err(),
+        Some(CaError::Tai(TaiError::TooLongForTrustAnchor(33)))
+    ));
+    let mut ca = ca_with(id(30)).unwrap();
+    // A cosigner of 33 bytes is refused; one of 32 is accepted.
+    let witness = |n: usize| MlDsaCosigner::<MlDsa44>::from_seed(id(n), [2u8; 32]);
+    assert!(matches!(
+        ca.add_cosigner(Box::new(witness(33))),
+        Err(CaError::Tai(TaiError::TooLongForTrustAnchor(33)))
+    ));
+    ca.add_cosigner(Box::new(witness(32))).unwrap();
+
+    // An unrecognized cosigner of 40 bytes in a certificate: read, ignored.
+    let mut w = world();
+    w.ca.submit(request(0)).unwrap();
+    w.ca.run_checkpoint_job(NOW).unwrap();
+    let mut cert = w.ca.standalone_certificate(0).unwrap();
+    cert.proof.signatures.push(SubtreeSignature {
+        cosigner_id: id(40),
+        signature: vec![0; 16],
+    });
+    let der = cert.to_der().unwrap();
+    assert_eq!(
+        MtcCertificate::from_der(&der)
+            .unwrap()
+            .proof
+            .signatures
+            .last()
+            .unwrap()
+            .cosigner_id,
+        id(40)
+    );
+    let v = verify_certificate(&der, &rp(&w, vec![]), NOW).unwrap();
+    assert_eq!(
+        v.basis,
+        Basis::Cosignatures(vec![w.ca_id.clone(), w.witness_id.clone()])
+    );
+
+    // A relying party configured with an ID of 33 bytes, as the CA's, as a
+    // recognized cosigner's or as a required one's, verifies nothing.
+    let too_long = |cfg: RelyingPartyConfig| {
+        matches!(
+            verify_certificate(&der, &cfg, NOW),
+            Err(VerifyError::Tai(TaiError::TooLongForTrustAnchor(33)))
+        )
+    };
+    assert!(too_long(RelyingPartyConfig {
+        ca_id: id(33),
+        ..rp(&w, vec![])
+    }));
+    let mut cfg = rp(&w, vec![]);
+    cfg.cosigners.push((
+        id(33),
+        Box::new(MlDsaVerifier::<MlDsa44>::from_bytes(&w.witness_key).unwrap()),
+    ));
+    assert!(too_long(cfg));
+    let mut cfg = rp(&w, vec![]);
+    cfg.required_cosigners.push(id(33));
+    assert!(too_long(cfg));
+    // At 32 bytes the recognized cosigner is merely absent from this
+    // certificate, and the policy that requires it is not met.
+    let mut cfg = rp(&w, vec![]);
+    cfg.cosigners.push((
+        id(32),
+        Box::new(MlDsaVerifier::<MlDsa44>::from_bytes(&w.witness_key).unwrap()),
+    ));
+    verify_certificate(&der, &cfg, NOW).unwrap();
+    cfg.required_cosigners.push(id(32));
+    assert!(verify_certificate(&der, &cfg, NOW).is_err());
+}
+
+/// A landmark whose ID, or its group's, would be longer than 32 bytes is
+/// not allocated (AUDIT.md §27).
+#[test]
+fn a_landmark_whose_id_would_exceed_32_bytes_is_not_allocated() {
+    let id = |n: usize| TrustAnchorId::from_binary(&vec![1; n]).unwrap();
+    let ca_with = |ca_id: TrustAnchorId| {
+        let cfg = CaConfig {
+            ca_id: ca_id.clone(),
+            log_number: 1,
+            max_cert_lifetime: WEEK,
+            oids: OIDS_IANA,
+        };
+        let signer = MlDsaCosigner::<MlDsa44>::from_seed(ca_id, [1u8; 32]);
+        let mut ca =
+            CertificationAuthority::new(cfg, Box::new(signer), MemoryGuard::default()).unwrap();
+        ca.submit(request(0)).unwrap();
+        ca.run_checkpoint_job(NOW).unwrap().unwrap();
+        ca
+    };
+    // 30 bytes: log 1 is `{caID 0 1}`, 32 bytes; landmark 1, `{caID 1 1 1}`,
+    // would be 33.
+    let mut ca = ca_with(id(30));
+    assert!(matches!(
+        ca.allocate_landmark(NOW),
+        Err(CaError::Tai(TaiError::TooLongForTrustAnchor(33)))
+    ));
+    assert_eq!(ca.landmarks().latest().number, 0, "nothing allocated");
+    // 29 bytes: landmark 1 is 32.
+    let mut ca = ca_with(id(29));
+    assert_eq!(ca.allocate_landmark(NOW).unwrap().unwrap().number, 1);
 }
 
 /// What the CA checks on the way in: validity, DER form, entry extensions;

@@ -446,7 +446,7 @@ give different bytes that verify the same.
 | `cacert` | `CaCertificate`: the CA's own certificate (subject = CA ID, the cosigner's key, the critical `MTCCertificationAuthority` extension, key usage and basic constraints), written unsigned (RFC 9925) and read from any implementation | new |
 | `spki` | `SubjectPublicKeyInfo` of cosigner keys: parse, compose, the ML-DSA OIDs of RFC 9881 | new |
 | `pem` | PEM (RFC 7468) and strict base64, without dependencies | new |
-| `tai` | `TrustAnchorId`: stores the binary form, tolerates any well-formed ID on the wire (GREASE), strict with what an operator types; arbitrary-precision ASCII, `oid/…`, log/landmark/group IDs, canonical order | new |
+| `tai` | `TrustAnchorId`: stores the binary form, tolerates any well-formed ID on the wire (GREASE, up to the 255 bytes `MTCProof` allows), strict with what an operator types; arbitrary-precision ASCII, `oid/…`, log/landmark/group IDs, canonical order. A CA, log, landmark, group or cosigner ID is a trust anchor ID, at most 32 bytes (draft-ietf-tls-trust-anchor-ids-06): held to it where a CA or a relying party is configured, where a CA certificate is written or read, and where an ID is derived, not where one is parsed (AUDIT.md §27) | new |
 | `cosign` | `CosignedMessage` (with its rules: timestamp only on checkpoints), `Cosigner`, `CosignatureVerifier`, `SignedSubtree`; `mldsa::{MlDsaCosigner, MlDsaVerifier}` with salted signing by default, seed zeroization and the `tlog-cosignature` *key ID* | `firma_cabeza` |
 | `guard` | `SequenceGuard` over `hbs_state::IndexGuard`; `MemoryGuard` for tests only | `hbs-state` |
 | `landmark` | `LandmarkSequence`: allocate, each landmark's subtrees, active ones, publish | new |

@@ -1419,3 +1419,160 @@ pull request, #342 by `bc93fb6`.
 **Lesson.** Retiring a set turned a corpus that proved agreement into one
 that proves refusal; the files did not change, the test that reads them
 says what they now mean.
+
+## §27 · Trust anchor IDs are at most 32 bytes; the MTC wire still carries 255
+
+**Commit** the one that adds this entry · 2026-10-07 · branch `next`, for the author's review
+
+**Why.** draft-ietf-tls-trust-anchor-ids-06, Section 4: "The length of a
+trust anchor ID's binary representation MUST NOT exceed 32 bytes"
+(`opaque TrustAnchorID<1..32>`). In `draft-07` the CA ID, each log ID, the
+landmark and landmark group IDs and each cosigner ID are trust anchor IDs,
+and the relying-party configuration section recalls the limit for the CA
+ID. This crate bounded them all at 255 bytes, the MTC wire type
+(`opaque TrustAnchorID<1..2^8-1>` in `MTCProof`). Noticed reading OpenSSL's
+pull request at `7bd37b7`: its `d48ad8b` ("Bound trust anchor IDs to 32
+bytes") applies the limit in its TLS layer (the `trust_anchors` extension,
+the requested lists, the `trust_anchor_id` certificate property,
+`generate_tai_chain`), while its MTC layer still accepts CA IDs of up to 225
+bytes (`OSSL_MTC_CA_ID_MAX`). The assistant first told the author that
+OpenSSL refuses such CA IDs outright; that was inexact, and was corrected
+before this change. The decision to bound them here is the author's
+(2026-10-07).
+
+**What changed.** `tai::MAX_TRUST_ANCHOR_ID_LEN` (32),
+`TaiError::TooLongForTrustAnchor` and `check_trust_anchor_len()`. An ID is
+held to the limit where it becomes a CA's, a log's, a landmark's or a
+cosigner's:
+
+- the CA ID, in `check_as_ca_id`: when a CA is configured, when its CA
+  certificate is written or read, and at the start of every verification,
+  for the CA ID in the relying party's configuration;
+- the log, landmark and group IDs, when derived (`log_id`, `landmark_id`,
+  `landmark_group_id`). So a CA whose log ID would exceed 32 bytes fails
+  when it is configured; a CA certificate whose highest log's ID would
+  exceed it is neither written nor read (`to_der` and `from_der` now call
+  `check_ids`); `allocate_landmark` checks the next landmark's ID before
+  allocating and, if it is too long, returns the error and allocates
+  nothing (its group's ID, `{caID 2 N L}`, always has the same length as
+  `{caID 1 N L}`, so one check covers both); and a certificate whose log
+  number gives a log ID longer than 32 bytes fails verification;
+- the cosigner IDs a CA adds (`add_cosigner`), and the recognized and the
+  required cosigners of a `RelyingPartyConfig`, checked with its CA ID at
+  the start of `verify_certificate`. The `interop` tool builds that
+  configuration from policy lines, `-require` and cosigner certificates, so
+  an ID too long from any of them is refused there.
+
+Not held: an ID read from an `MTCProof`, bounded by 255 as its wire type
+says; such an ID matches no configured cosigner and is ignored, as the
+draft requires of unrecognized cosigners. `from_ascii` and `from_binary`
+do not apply the limit either: it applies where an ID takes a role, not
+where it is parsed. `check_as_ca_id` keeps its checks that the derived IDs
+with the largest values fit on the wire and in an `oid/…` name, now
+commented as defensive (at 32 bytes the longest name is 172 characters),
+but does not require those IDs to be trust anchor IDs, which would have
+limited CA IDs to 18 bytes: a CA ID of 32 bytes is valid, leaves no room
+for a log, and that is reported when the log ID is derived. For an
+operator: a CA ID of n bytes with a log number below 128 leaves 30 − n
+bytes for the landmark number; at 28 bytes, landmarks stop at 16383. The
+docs of `CertificationAuthority::new`, `add_cosigner` and `VerifyError::Tai`
+say so, and README's table of modules.
+
+**Tests.** In `src/tai.rs`,
+`trust_anchor_ids_are_at_most_32_bytes_and_the_wire_is_not`: 255 bytes
+still parse; a CA ID of 32 bytes passes and one of 33 does not; a log ID
+of 30 + 2 bytes passes and 30 + 3 does not; landmark and group IDs of
+29 + 3 pass and 30 + 3 do not; a CA ID of 32 bytes has no valid log ID.
+The former `a_ca_id_that_leaves_no_room_for_its_children_is_rejected`,
+renamed `a_long_ca_id_fails_on_its_length_before_its_names`, expects
+`TooLongForTrustAnchor(255)`. In `src/cacert.rs`,
+`a_ca_certificate_with_ids_longer_than_32_bytes_is_refused`: a CA
+certificate with a CA ID of 33 bytes, and one of 31 bytes with logs 1 to 5
+(log 5's ID would be 33 bytes), are refused by `to_der` and, written by the
+encoder without the check, by `from_der`; one of 30 bytes round-trips. In
+`tests/end_to_end.rs`,
+`trust_anchor_ids_longer_than_32_bytes_are_refused_where_configured`: a CA
+with a CA ID of 33 bytes is refused, and one of 31, whose log 1 would be 33
+bytes; a cosigner of 33 bytes is refused and one of 32 accepted; a
+certificate carrying an extra cosignature from an unknown cosigner of 40
+bytes is read, and verifies on the CA's and the witness's cosignatures; a
+relying party configured with an ID of 33 bytes as its CA ID, as a
+recognized cosigner or as a required one verifies nothing
+(`TooLongForTrustAnchor(33)`); with a recognized cosigner of 32 bytes the
+certificate verifies, and requiring it fails on the policy. And
+`a_landmark_whose_id_would_exceed_32_bytes_is_not_allocated`: with a CA ID
+of 30 bytes `allocate_landmark` returns `TooLongForTrustAnchor(33)` and
+the latest landmark is still 0; with 29 bytes it allocates landmark 1.
+
+**Falsified**, each restored. Before the review: with the length check
+always passing, both unit tests of `tai` and the integration test fail;
+with the wire bound narrowed to 32 as well, they fail too; with only the
+`MTCProof` parser narrowed to 32, the integration test fails where it reads
+the certificate with the cosigner of 40 bytes. After it, each of the ten
+checks removed in turn, by a script, made its test fail and nothing else
+was needed: the CA ID's length in `check_as_ca_id` and the derived IDs' (the
+unit test of `tai`); the CA certificate's check when written, when read,
+and of its highest log's ID (the unit test of `cacert`); the check in
+`add_cosigner` and the relying party's three, on its CA ID, its recognized
+cosigners and its required ones (the first integration test); and the one
+in `allocate_landmark` (the second). The first run of the full suite
+after the script failed the two unit tests of `tai` and `cacert`: the
+script had restored each file from a copy whose time was older than the
+build of the last mutation, and cargo reused that build. The code was the
+intended one; with the sources touched, the suite passes (counters below),
+and the script now refreshes the time of what it restores.
+
+**Reviewed** before committing by an independent review of the uncommitted
+change (a separate agent of the same session, working on a copy). No
+blocking problem; eight points, all addressed in this commit: (1) the CA
+allocated landmarks without the check, so a CA ID of 30 bytes got landmark
+1, whose ID is 33 bytes, while the docs said every derived landmark ID was
+checked: `allocate_landmark` now checks first; (2) the code cited this
+section before it was written: it is written in the same commit; (3) the
+relying party was never held to the limit, although a doc said a long ID
+read from a proof could match no configured cosigner: `verify_certificate`
+now checks its configuration first; (4) the doc of `VerifyError::Tai` was
+stale and, with a CA ID of 33 bytes in a relying party's configuration, the
+error named the log ID's 35 bytes: the doc is rewritten, the check at the
+start reports 33, and the docs of `new` and `add_cosigner` say they refuse;
+(5) a CA certificate could be written and read with a CA ID of 31 bytes
+that `new` refuses: `to_der` and `from_der` check the ID of its highest log
+too (the review proposed the lowest; the highest is the longest); (6) the
+rest of `check_as_ca_id` can no longer fail, and a test's name said what it
+no longer tests: commented and renamed; (7) README read as if parsing
+enforced 32 bytes: reworded; (8) nothing tested that a CA certificate with
+a long CA ID is refused: added.
+
+**Interoperability.** `interop/run.sh` against `demo/` at `26db9f2`, built
+by the script (no tracked changes, Go 1.27.1): 26/26 (21 OK, 5 FAIL), 9/9
+with both CA certificates, the log rebuilt to `i35OIgqu…`, the CA's line
+read as a timestamped tlog-cosignature; `failures: 0`.
+`interop/run-openssl.sh`, with OpenSSL at `ecf0476` and `mtc` at `c6cdfe2`
+as in §19: `failures: 0`, the known difference (`mtc-landmark-1-iana-alg.pem`,
+mixed OID sets) unchanged. Both ran on this commit's tree before it was
+committed, so their headers name its parent, `ab8d8c1`. Below the
+headers, both results are identical to those of §26 after #355. No ID that
+mtc-core configured or derived in them is longer than 32 bytes, or its CA
+would not have started or its verifier would have refused every
+certificate; so no verdict moves, as expected.
+
+**For the working group, perhaps.** `draft-07` keeps
+`opaque TrustAnchorID<1..2^8-1>` in `MTCProof`, while trust-anchor-ids-06
+defines `TrustAnchorID<1..32>`. The encoding is the same, one length byte;
+only the bound differs. Whether the MTC draft should cite the narrower type
+is the editors' question; it is not raised here.
+
+**Counters, at this commit.** `cargo fmt --check`: clean · `cargo clippy
+--all-targets -- -D warnings`: clean · `cargo doc --no-deps`: no warnings ·
+`cargo test`: 77/0 (52 + 9 + 1 + 6 + 2 + 7; 73 before: two unit tests and
+two integration tests added) · without `ml-dsa`: 58/0 (48 + 1 + 2 + 7).
+
+**What it does not close.** The measurement against OpenSSL's pull request
+at `7bd37b7` and Bob Beck's `mtc` at `0fe8a6e` (which can now issue with the
+IANA OIDs); whether to raise the type above.
+
+**Lesson.** A limit can live in one document and bind identifiers defined
+in another: the MTC draft calls its IDs trust anchor IDs, and their bound is
+in trust-anchor-ids. Reading what a neighbour changed this week found it;
+the review found three places where the first version of this change had
+not applied it.

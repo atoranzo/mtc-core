@@ -191,8 +191,10 @@ pub struct CertificationAuthority<G: SequenceGuard> {
 
 impl<G: SequenceGuard> CertificationAuthority<G> {
     /// A CA with its cosigner (the one holding the CA's ID) and its guard.
-    /// Fails at startup, not at issuance, if the CA ID leaves no room for
-    /// its derived IDs or the cosigner does not carry that ID.
+    /// Fails at startup, not at issuance, if the CA ID or its log's ID is
+    /// not a trust anchor ID of at most 32 bytes (AUDIT.md §27), or the
+    /// cosigner does not carry the CA ID. A landmark whose ID would be
+    /// longer is refused when it would be allocated.
     pub fn new(cfg: CaConfig, ca_cosigner: Box<dyn Cosigner>, guard: G) -> Result<Self, CaError> {
         cfg.ca_id.check_as_ca_id()?;
         if ca_cosigner.cosigner_id() != &cfg.ca_id {
@@ -221,9 +223,12 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
     /// An external cosigner (witness, mirror) to request cosignatures from.
     /// Neither the CA's ID nor one already registered: the `MTCProof`
     /// requires unique IDs, and a repeat would silently replace the previous
-    /// signature.
+    /// signature. Its ID is a trust anchor ID of at most 32 bytes (AUDIT.md
+    /// §27).
     pub fn add_cosigner(&mut self, cosigner: Box<dyn Cosigner>) -> Result<(), CaError> {
         let id = cosigner.cosigner_id();
+        // A cosigner ID is a trust anchor ID (AUDIT.md §27).
+        id.check_trust_anchor_len()?;
         if id == &self.cfg.ca_id
             || self
                 .external_cosigners
@@ -418,6 +423,11 @@ impl<G: SequenceGuard> CertificationAuthority<G> {
         if size == self.landmarks.latest().tree_size {
             return Ok(None);
         }
+        // The landmark's IDs are trust anchor IDs (AUDIT.md §27): a landmark
+        // whose ID would not be one is not allocated. Its group's ID,
+        // `{caID 2 N L}`, has the same length as `{caID 1 N L}`.
+        let next = self.landmarks.latest().number + 1;
+        self.cfg.ca_id.landmark_id(self.cfg.log_number, next)?;
         let expiry = now
             .saturating_add(self.cfg.max_cert_lifetime)
             .max(self.max_not_after);

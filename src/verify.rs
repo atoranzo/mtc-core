@@ -97,7 +97,9 @@ pub enum VerifyError {
     UnknownIssuer,
     /// The subtree is trusted but its hash does not match.
     TrustedSubtreeMismatch,
-    /// A derived identifier does not fit on the wire (CA ID too long).
+    /// An identifier is not a trust anchor ID of at most 32 bytes (AUDIT.md
+    /// §27): one in the configuration (the CA ID, a cosigner's), or the log
+    /// ID derived from the CA ID and the certificate's serial number.
     Tai(crate::tai::TaiError),
     /// The cosigned message could not be composed.
     Cosign(String),
@@ -128,6 +130,18 @@ pub fn verify_certificate(
     cfg: &RelyingPartyConfig,
     now: u64,
 ) -> Result<VerifiedCertificate, VerifyError> {
+    // 0 · the configuration's IDs are trust anchor IDs, at most 32 bytes
+    // (AUDIT.md §27); those read from the certificate are not held to it.
+    cfg.ca_id.check_as_ca_id()?;
+    for id in cfg
+        .cosigners
+        .iter()
+        .map(|(id, _)| id)
+        .chain(&cfg.required_cosigners)
+    {
+        id.check_trust_anchor_len()?;
+    }
+
     // 1-2 · id-alg-mtcProof and the MTCProof, with no trailing data.
     let cert = MtcCertificate::from_der(cert_der)?;
     let fields = der::parse_tbs(&cert.tbs_certificate)?;

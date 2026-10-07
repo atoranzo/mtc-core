@@ -136,7 +136,21 @@ impl CaCertificate {
     /// and three critical extensions: key usage `keyCertSign`, basic
     /// constraints `cA = TRUE`, and the MTC CA extension.
     pub fn to_der(&self) -> Result<Vec<u8>, CaCertError> {
+        self.check_ids()?;
+        self.encode()
+    }
+
+    /// The CA ID is a trust anchor ID, and so is the ID of each log its
+    /// serial range covers: the highest log number has the longest one
+    /// (AUDIT.md §27).
+    fn check_ids(&self) -> Result<(), CaCertError> {
         self.ca_id.check_as_ca_id()?;
+        self.ca_id.log_id(*self.log_numbers().end())?;
+        Ok(())
+    }
+
+    /// The DER of [`Self::to_der`], without checking the IDs.
+    fn encode(&self) -> Result<Vec<u8>, CaCertError> {
         spki::parse(&self.spki)?;
         der::expect_tlv(&self.sig_alg, der::TAG_SEQUENCE)?;
 
@@ -288,6 +302,7 @@ impl CaCertificate {
             oids,
         };
         ca.check_serials()?;
+        ca.check_ids()?;
         Ok(ca)
     }
 
@@ -376,6 +391,32 @@ pub use with_ml_dsa::ml_dsa_verifier_from_spki;
 mod tests {
     use super::*;
     use crate::spki::MlDsaParameterSet;
+
+    /// AUDIT.md §27: a CA certificate whose CA ID, or the ID of its highest
+    /// log, is longer than 32 bytes is neither written nor read.
+    #[test]
+    fn a_ca_certificate_with_ids_longer_than_32_bytes_is_refused() {
+        let id = |n: usize| crate::TrustAnchorId::from_binary(&vec![1; n]).unwrap();
+        assert_eq!(sample().log_numbers(), 1..=5);
+        // 33 bytes: not a CA ID. 31 bytes: a CA ID, but log 5's ID is 33.
+        for (n, too_long) in [(33, 33), (31, 33)] {
+            let ca = CaCertificate {
+                ca_id: id(n),
+                ..sample()
+            };
+            let refused = Some(CaCertError::Tai(
+                crate::tai::TaiError::TooLongForTrustAnchor(too_long),
+            ));
+            assert_eq!(ca.to_der().err(), refused);
+            let der = ca.encode().unwrap();
+            assert_eq!(CaCertificate::from_der(&der).err(), refused);
+        }
+        let ok = CaCertificate {
+            ca_id: id(30),
+            ..sample()
+        };
+        assert_eq!(CaCertificate::from_der(&ok.to_der().unwrap()).unwrap(), ok);
+    }
 
     fn sample() -> CaCertificate {
         CaCertificate {
