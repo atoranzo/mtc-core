@@ -1032,13 +1032,15 @@ fn checkpoint(args: &[String]) -> Res<bool> {
                 .map(|m| verifier.verify(&m, &sig[8..]))
                 .unwrap_or(false)
         };
-        // (b) the reference tool today: the bare signature, timestamp 0.
+        // (b) the reference tool until ietf-plants-wg/merkle-tree-certs#355
+        //     (2026-10-07; the corpora here are from before it): the bare
+        //     signature, timestamp 0. The tool writes (a) since.
         let bare = message(0)
             .map(|m| verifier.verify(&m, sig))
             .unwrap_or(false);
         match (with_timestamp, bare) {
             (true, _) => println!("- verifies as a timestamped tlog-cosignature (C2SP form)"),
-            (_, true) => println!("- verifies as a bare subtree signature over [0, {size}) with timestamp 0 (the reference tool's form; no timestamp on the line)"),
+            (_, true) => println!("- verifies as a bare subtree signature over [0, {size}) with timestamp 0 (the reference tool's form before #355; no timestamp on the line)"),
             _ => {
                 all_ok = false;
                 println!("- does NOT verify in either form");
