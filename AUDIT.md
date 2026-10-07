@@ -1378,6 +1378,18 @@ committer and no signature. The state of the two issues on
 GitHub was not read (this session has no API access to that repository);
 `demo/` unchanged since `38014f7` says that neither is fixed in the code.
 
+**Merged** the same evening: David Benjamin approved it ("Thanks!") and
+merged it into `main` as `26db9f2`, and closed #341 "as completed via
+bfb754f". Measured after the merge: `interop/run.sh` against `demo/` at
+`26db9f2`, built by the script: 26/26, 9/9 with both CA certificates, the
+log rebuilt to `i35OIgqu…`, and the CA's line of the checkpoint read as "a
+timestamped tlog-cosignature (C2SP form)"; `failures: 0`. `torchwood`
+accepts that checkpoint. `interop checkpoint` still reads the bare form too,
+because both corpora here were written before the fix; its message for that
+form now says it is the tool's form before #355 (commit `d4703b4`, whose
+message announced this paragraph, which a failed edit had left out; it is
+added here).
+
 **Not measured again here.** OpenSSL's pull request and Bob Beck's `mtc`
 have moved since §19 and §21 (`7bd37b7` and `0fe8a6e`, against `ecf0476`
 and `c6cdfe2`).
@@ -1399,8 +1411,10 @@ demo's change of default version does not reach `run.sh`, which passes its
 own configuration and `-version`. `interop/run-openssl.sh`: `failures: 0`,
 the known difference unchanged.
 
-**What it does not close.** The review of #355; the measurement against
-OpenSSL and `mtc` at their new heads; the `CosignedSubtree` rename.
+**What it does not close.** The measurement against OpenSSL and `mtc` at
+their new heads; the `CosignedSubtree` rename. Of the two findings of §14
+for the working group, both are now closed upstream: #341 by the author's
+pull request, #342 by `bc93fb6`.
 
 **Lesson.** Retiring a set turned a corpus that proved agreement into one
 that proves refusal; the files did not change, the test that reads them
