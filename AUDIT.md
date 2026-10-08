@@ -1567,6 +1567,17 @@ is the editors' question; it is not raised here.
 `cargo test`: 77/0 (52 + 9 + 1 + 6 + 2 + 7; 73 before: two unit tests and
 two integration tests added) · without `ml-dsa`: 58/0 (48 + 1 + 2 + 7).
 
+**On the author's machine**, at `05436be`, 2026-10-08 (WSL2, rustc 1.97.1,
+Go 1.27.1): `cargo fmt --check` and `cargo clippy --all-targets -- -D
+warnings` clean; `cargo test` 77/0 (52 + 9 + 1 + 6 + 2 + 7); without
+`ml-dsa` 58/0 (48 + 1 + 2 + 7). `interop/run.sh` at 04:48:21 UTC against
+the draft repository's `main`, which his pull brought from `bc93fb6` to
+`26db9f2` (built by the script, no tracked changes; its header names
+`05436be`): 26/26 (21 OK, 5 FAIL), 9/9 with both CA certificates, the log
+rebuilt to `i35OIgqu…`, the CA's line read as a timestamped
+tlog-cosignature; `failures: 0`. `interop/run-openssl.sh`: `failures: 0`,
+the known difference unchanged.
+
 **What it does not close.** The measurement against OpenSSL's pull request
 at `7bd37b7` and Bob Beck's `mtc` at `0fe8a6e` (which can now issue with the
 IANA OIDs); whether to raise the type above.
