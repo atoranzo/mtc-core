@@ -1725,11 +1725,27 @@ clean · `cargo clippy --all-targets -- -D warnings`: clean · `cargo doc
 without `ml-dsa`: 58/0 (48 + 1 + 2 + 7). `interop/run-openssl.sh` at
 `7bd37b7` and `0fe8a6e`: `failures: 0`, as above.
 
-**What it does not close.** The author's run on his machine, which needs
-OpenSSL rebuilt at `7bd37b7` and `mtc` at `0fe8a6e`. No identifier this
-crate writes comes near 32 bytes, so OpenSSL's new bound is reached only by
-the build probe. `mtc-subscriber`. Whether to raise with the working group
-the type of §27.
+**On the author's machine**, at `da98ee2`, 2026-10-08 (WSL2), with `mtc`
+rebuilt at `0fe8a6e`, twice. The first time, his OpenSSL source tree, a
+shallow copy with no remote, could not fetch the pull request: `git fetch
+origin` failed, and with it the checkout of `7bd37b7`; `make` found nothing
+to rebuild and `make install_sw` installed the `ecf0476` build again. The
+run said so: its header named `ecf0476`, and "openssl build: takes a
+33-byte trust anchor ID (older than d48ad8b)". It did not stop, because
+that source tree did not have `d48ad8b` either, so it measured `ecf0476`,
+consistently: `failures: 0`, and both passes of section 2 (20 certificates
+each, each with its set only). The second time, fetched from the
+repository's URL, checked out at `7bd37b7`, rebuilt and installed: header
+`7bd37b7`, "openssl build: refuses a 33-byte trust anchor ID (d48ad8b or
+later)", `mtc: 0fe8a6e`, both passes of section 2 as above, the mirror's
+cosigner certificate experimental in both, no line "DIFFERENT" or "NOT",
+`failures: 0`. No Rust code changed, so the tests were not run again. The
+line added for the build caught, on its first use on his machine, the
+stale binary it was added for.
+
+**What it does not close.** No identifier this crate writes comes near 32
+bytes, so OpenSSL's new bound is reached only by the build probe.
+`mtc-subscriber`. Whether to raise with the working group the type of §27.
 
 **Lesson.** A new option on the other side is a new measurement, and a
 measurement that could quietly go on measuring the old thing needs a check

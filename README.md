@@ -580,8 +580,8 @@ per version, one ledger entry per change) and none of the STARK code.
   is one draft and a draft one set of OIDs, §24). The run at `ecf0476` and
   `c6cdfe2` was made by the assistant in a container and repeated by the
   author on his machine, with the same result (§21); the one at `7bd37b7`
-  and `0fe8a6e`, with his CA's IANA certificates, by the assistant (§28), not
-  yet on the author's machine. The OIDs changed meanwhile: `demo/` writes
+  and `0fe8a6e`, with his CA's IANA certificates, likewise (§28). The OIDs
+  changed meanwhile: `demo/` writes
   the IANA-assigned ones
   since `ad4256b`, and the measurement was repeated against it at `38014f7`,
   with the same verdicts (§18; repeated by the author on his machine, §23).
