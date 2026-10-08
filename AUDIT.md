@@ -1587,3 +1587,153 @@ in another: the MTC draft calls its IDs trust anchor IDs, and their bound is
 in trust-anchor-ids. Reading what a neighbour changed this week found it;
 the review found three places where the first version of this change had
 not applied it.
+
+## §28 · OpenSSL at `7bd37b7` and `mtc` at `0fe8a6e`: measured again, and his CA's IANA certificates too
+
+**Commit** the one that adds this entry · 2026-10-08 · branch `next`, for the author's review
+
+**Why.** Both had moved since the measurements of §19 and §21 (`ecf0476` and
+`c6cdfe2`); §26 and §27 left it open. The author asked for it (2026-10-08).
+
+**What changed on their side.** OpenSSL's pull request
+`openssl/openssl#33014`, `ecf0476..7bd37b7`: three commits, eleven files
+(+69 −34), the corpus under `test/mtc` untouched.
+
+- `d48ad8b` bounds trust anchor IDs to 32 bytes in the TLS layer (the
+  `trust_anchors` extension, the requested lists, a credential's
+  `trust_anchor_id`, `generate_tai_chain`); read in §27.
+- `973e70a` rewrites `ossl_mtc_subtree_is_valid`: from "the size is at most
+  the largest power of two that divides the start" to "the start is a
+  multiple of the size rounded up to a power of two" (the draft's section
+  4.1 wording), with an explicit case for sizes above 2^63, and adds three
+  test cases at sizes around 2^63 (2^63 − 1, 2^63 and 2^63 + 1). The two
+  rules accept the same subtrees: for a start other than 0, size ≤ 2^k
+  exactly when the size rounded up to a power of two is at most 2^k, that
+  is, divides the start. Checked here by brute force, on the two C bodies
+  compiled (4,427,076 evaluations: every pair below 2048, every pair of
+  values within 3 of a power of two, with 0 and the top three values, and
+  aligned starts with sizes around each power of two) and on a
+  transcription to Python (186,673 distinct pairs): no difference.
+- `7bd37b7` replaces a local 48-bit reader in `ossl_mtc_proof_parse` with
+  `PACKET_get_net_6`, already in `include/internal/packet.h`, which reads the
+  same six bytes, big-endian.
+
+So no verdict was expected to move. Bob Beck's `mtc`, `c6cdfe2..0fe8a6e`:
+two commits, seven files (+483 −2). `31f118e` adds `mtc ca new
+--iana-oids`, with which the CA certificate and every certificate the CA
+issues are written with the IANA OIDs (one set for both); the cosigner
+certificate a mirror writes keeps the experimental attribute
+(`MarshalCosignerCertificate`). `0fe8a6e` adds `mtc-subscriber` and `GET
+/queue?id=`, which a relying party does not read; not measured.
+
+**What changed here**, all in `interop/`:
+
+- Section 2 of `run-openssl.sh` (his CA, through his mirror, against this
+  crate) runs once per OID set the CA can issue with: the experimental set,
+  as before, and the IANA set with `--iana-oids` when the `mtc` measured has
+  that option; without it, the pass says it is not measured and counts no
+  failure. Each pass checks that the certificates the CA issued and its CA
+  certificate carry that set and no other, with the new `oidset.py`, which
+  looks for the encoded OIDs in the DER and has no MTC code, and reports the
+  set of the mirror's cosigner certificate. The lines of section 2 now start
+  with the set ("experimental-06 OIDs, mirror: …"), and its directories are
+  `bob-experimental-06` and `bob-iana` instead of `bob`.
+- The OpenSSL build is identified, not only its source tree. The header
+  names the source tree's commit, and nothing in `openssl version -a` tells a
+  `7bd37b7` build from an `ecf0476` one (same lines, same "built on"); every
+  verdict is the same for both. A new line, `openssl build:`, says whether
+  `generate_tai_chain` refuses a trust anchor ID of 33 bytes and takes one of
+  32, which it does from `d48ad8b` on; if the source tree has `d48ad8b` and
+  the binary takes 33 bytes, the script stops and asks for `make && make
+  install_sw`, as §23 made it do for `mtc`.
+- Section 3's "another CA under the same ID" names its CA certificate
+  (`mtc`'s, from section 2's experimental pass) instead of reading the
+  variable section 2 left, which the loop would have made depend on the last
+  pass.
+- The wrong subtree hash, in sections 2 and 3, changes the first base64
+  character to `A`, or to `B` if it was `A`. Since §19 it was set to `A`,
+  which left it equal one time in 64; section 2 reported that as "the
+  wrong-hash subtree file is not wrong" and counted a failure, so it was a
+  spurious failure, never a false pass. It happened in one of the runs
+  below (a hash beginning `Aony…`), and that is how it was found.
+- README and `interop/README.md` say so; README now says which of the two
+  runs against OpenSSL and `mtc` the author has repeated.
+
+**Measured** in the container, with OpenSSL built from `7bd37b7` and `mtc`
+from `0fe8a6e` (Go 1.27.1). First with the script unchanged, at `61721e5`:
+`failures: 0`, and below the header its results are identical, line by
+line, to those of §27's run at `ecf0476` and `c6cdfe2`. Then with the
+script of this commit, run before it was committed (so its header names its
+parent, `61721e5`): `failures: 0`; "openssl build: refuses a 33-byte trust
+anchor ID"; sections 1, 3 and 4 identical to the first run, the known
+difference of §19 (`mtc-landmark-1-iana-alg.pem`) unchanged. In section 2,
+each pass: 20 certificates (10 landmark-relative), 3 landmarks, 4 negatives;
+the certificates and the CA certificate with that set only, the mirror's
+cosigner certificate experimental in both; and the same verdict here as
+from his verifier in the four configurations (22 OK and 2 FAIL with the
+subtrees and the mirror, 10/14 with the mirror alone, 11/13 with the CA
+alone, 12/12 with a wrong subtree hash), file by file the same verdicts in
+the two passes. This crate reads his IANA certificates with a cosigner
+certificate whose attribute is experimental, as his verifier does: the
+one-set rule (§22, §25) binds a certificate and its CA, not the cosigners.
+
+**Falsified**, each restored. With the iana pass run without
+`--iana-oids`, the check reports "NOT every certificate, or the CA
+certificate, is written with the iana OIDs only" and the script exits 1.
+With `mtc` at `c6cdfe2`, which lacks the option, the pass says "this mtc
+cannot issue with them (no --iana-oids; added in 31f118e), not measured",
+and the run ends with `failures: 0`. With the `ecf0476` build and the source
+tree at `7bd37b7`, the script says "openssl build: takes a 33-byte trust
+anchor ID (older than d48ad8b)" and stops with exit 2; with the same build
+and the source tree at `ecf0476`, it says the same and runs, `failures: 0`.
+The `--iana-oids` probe, 500 times with the four CPUs busy: never missed.
+The wrong-hash fix, on the file of the run where the old derivation failed:
+the old `sed` leaves it equal, the new one changes `A` to `B`.
+`oidset.py` on known files: OpenSSL's `mtc-landmark-1-iana-alg.pem` reads
+"mixed", this crate's IANA certificates "iana", his CA's experimental ones
+"experimental".
+
+**Reviewed** before committing by an adversarial review of the uncommitted
+change (27 agents of the same session: four reviewers, on the script,
+`oidset.py`, the facts of this entry and what the measurement missed, and
+one skeptic per finding trying to refute it). Ten points survived, all
+addressed here: (1) the first version detected the option with `mtc ca new
+--help | grep -q --iana-oids` under `pipefail`; `grep -q` can close the pipe
+before `mtc` has written its help, `mtc` then dies of `SIGPIPE`, and the
+IANA pass was skipped as "not measured" with `failures: 0` (measured by the
+review: 1 time in 2000 idle, 110 in 500 with the CPUs busy; the run
+recorded here was not affected): the help is now read whole before it is
+searched; (2) section 3's other CA came from the loop's variable: named;
+(3) nothing showed which OpenSSL build ran: the `openssl build:` line and
+the stop; (4) `interop/README.md` described section 2 as one pass: updated;
+(5) README's "That run … repeated by the author (§21)" read as covering this
+run too: each run now says who made it; (6) to (10), wording: the name
+`id-pe-mtcCertificationAuthority-SHA256` in `oidset.py`, its "any 47.N" (it
+matches N below 128, every set of that arc so far), "three test cases at
+those sizes", a pair count that counted 1,296 pairs twice, and the header
+of the second run. Seven findings did not survive their skeptic, among
+them that the run
+should test OpenSSL's 32-byte bound itself (OpenSSL's own tests do; the
+probe above uses it only to identify the build) and that OpenSSL's unit
+tests should have been run here (they were not; this run measures this
+crate against OpenSSL, not OpenSSL). The wrong-hash defect was found by a
+run, not by the review.
+
+**Counters, at this commit.** No Rust code changed. `cargo fmt --check`:
+clean · `cargo clippy --all-targets -- -D warnings`: clean · `cargo doc
+--no-deps`: no warnings · `cargo test`: 77/0 (52 + 9 + 1 + 6 + 2 + 7) ·
+without `ml-dsa`: 58/0 (48 + 1 + 2 + 7). `interop/run-openssl.sh` at
+`7bd37b7` and `0fe8a6e`: `failures: 0`, as above.
+
+**What it does not close.** The author's run on his machine, which needs
+OpenSSL rebuilt at `7bd37b7` and `mtc` at `0fe8a6e`. No identifier this
+crate writes comes near 32 bytes, so OpenSSL's new bound is reached only by
+the build probe. `mtc-subscriber`. Whether to raise with the working group
+the type of §27.
+
+**Lesson.** A new option on the other side is a new measurement, and a
+measurement that could quietly go on measuring the old thing needs a check
+that it measured the new one: the bytes of the certificates for `mtc`, a
+behaviour of the binary for OpenSSL. The first check written for that
+could itself fail quietly; the review found it, and a run found a negative
+that had sometimes not been negative since §19.

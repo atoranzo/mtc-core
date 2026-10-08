@@ -563,9 +563,11 @@ per version, one ledger entry per change) and none of the STARK code.
   `openssl/openssl#33014`, the TLS client and server side in C) and Bob Beck's
   rewrite of Cloudflare's Go CA and mirror for `-06`
   (`github.com/bob-beck/cloudflare-mtc`). Against those two, at `ecf0476` and
-  `c6cdfe2`, with `interop/run-openssl.sh` (§19): his verifier gives every
+  `c6cdfe2` (§19) and again at `7bd37b7` and `0fe8a6e` (§28), with
+  `interop/run-openssl.sh`: his verifier gives every
   certificate from here, with either OID set, the verdict expected of it; his
-  CA's 20 certificates, issued through his mirror, and four negatives cut from
+  CA's 20 certificates, issued through his mirror with either OID set (the
+  IANA one since his `31f118e`, §28), and four negatives cut from
   them byte by byte get the same verdict here as from his verifier, in four
   configurations; OpenSSL's `s_client` accepts this crate's standalone and
   landmark-relative certificates in a TLS 1.3 handshake with its `s_server`,
@@ -575,10 +577,12 @@ per version, one ledger entry per change) and none of the STARK code.
   with the experimental issuer, which both accept and this crate refuses (a
   policy difference, recorded in §19; the stricter reading is kept, and a test
   holds it, §22; the draft's principal author answered on the list that a CA
-  is one draft and a draft one set of OIDs, §24). That run was made by the
-  assistant in a
-  container and repeated by the author on his machine, with the same result
-  (§21). The OIDs changed meanwhile: `demo/` writes the IANA-assigned ones
+  is one draft and a draft one set of OIDs, §24). The run at `ecf0476` and
+  `c6cdfe2` was made by the assistant in a container and repeated by the
+  author on his machine, with the same result (§21); the one at `7bd37b7`
+  and `0fe8a6e`, with his CA's IANA certificates, by the assistant (§28), not
+  yet on the author's machine. The OIDs changed meanwhile: `demo/` writes
+  the IANA-assigned ones
   since `ad4256b`, and the measurement was repeated against it at `38014f7`,
   with the same verdicts (§18; repeated by the author on his machine, §23).
   Cloudflare's own `bwesterb/mtc` still follows the earlier batch

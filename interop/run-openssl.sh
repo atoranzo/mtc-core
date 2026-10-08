@@ -69,6 +69,24 @@ INTEROP="$ROOT/target/release/examples/interop"
 "$OPENSSL" req -x509 -key "$OUT/fallback-key.pem" -out "$OUT/fallback.pem" -days 2 \
   -subj /CN=fallback -config /dev/null 2>/dev/null
 
+# The header names the source tree's commit, which says nothing of the build
+# that runs (AUDIT.md §28). From d48ad8b on, OpenSSL refuses a trust anchor
+# ID of 33 bytes and still takes one of 32: that tells the two apart.
+tai_probe() { # BYTES
+  "$OPENSSL" generate_tai_chain -chain "$OUT/fallback.pem" -out "$OUT/tai-probe.pem" \
+    -oid "$(python3 -c "print('.'.join(['1'] * $1))")" >/dev/null 2>&1
+}
+if ! tai_probe 32; then
+  say "openssl build: generate_tai_chain refuses a 32-byte trust anchor ID; the build is not identified"
+elif tai_probe 33; then
+  say "openssl build: takes a 33-byte trust anchor ID (older than d48ad8b)"
+  if git -C "$OPENSSL_SRC" merge-base --is-ancestor d48ad8bafa934b94ec373edba2d1765b2c1ec907 HEAD 2>/dev/null; then
+    echo "$OPENSSL is older than $OPENSSL_SRC, which has d48ad8b: rebuild and install it (make && make install_sw)" >&2; exit 2
+  fi
+else
+  say "openssl build: refuses a 33-byte trust anchor ID (d48ad8b or later)"
+fi
+
 # ── 1. mtc-core → Bob's verifier ──
 say ""
 say "## 1. mtc-core -> mtc verify"
@@ -90,56 +108,85 @@ done
 # ── 2. Bob's CA → mtc-core ──
 say ""
 say "## 2. mtc's CA (with a mirror) -> mtc-core"
-B="$OUT/bob"; rm -rf "$B"; mkdir -p "$B/keys" "$B/neg"
-PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-"$MTC" ca -p "$B/ca" new --log 1 --max-lifetime 168h --landmark-interval 1s 32473.1 > "$B/setup.log"
-"$MTC" mirror -p "$B/mirror" new 32473.2 >> "$B/setup.log"
-"$MTC" mirror -p "$B/mirror" add-log --log 1 "$B/ca/ca-cert.pem" >> "$B/setup.log"
-"$MTC" mirror -p "$B/mirror" serve --listen "localhost:$PORT" > "$B/mirror.log" 2>&1 &
-MIRROR_PID=$!
-for _ in $(seq 50); do grep -q serving "$B/mirror.log" && break; sleep 0.1; done
-"$MTC" ca -p "$B/ca" add-mirror --required "http://localhost:$PORT" "$B/mirror/cosigner-cert.pem" >> "$B/setup.log"
-q() { "$MTC" ca -p "$B/ca" queue --generate-key "$1" --key "$B/keys/k$2.pem" --dns "b$2.example" >/dev/null; }
-for i in 1 2 3 4 5; do q p256 $i; done; q mldsa44 6
-"$MTC" ca -p "$B/ca" issue > "$B/issue.log"; sleep 2
-for i in 7 8 9; do q p256 $i; done
-"$MTC" ca -p "$B/ca" issue >> "$B/issue.log"; sleep 2
-q p256 10
-"$MTC" ca -p "$B/ca" issue >> "$B/issue.log"
-kill "$MIRROR_PID"; MIRROR_PID=
-"$MTC" ca -p "$B/ca" export-openssl -o "$B/ossl" > /dev/null
-# Negatives, derived at the byte level by flip.py (no MTC code): entry 0's
-# subtree [0, 4) has a two-hash inclusion proof and two cosignatures (the
-# CA's, then the mirror's).
-python3 "$FLIP" proof "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_bitflip.pem"
-python3 "$FLIP" proof "$B/ca/certs/1/0-landmark-1.pem" "$B/neg/0_landmark_bitflip.pem"
-python3 "$FLIP" sig 0 "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_ca_sig_flip.pem"
-python3 "$FLIP" sig 1 "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_mirror_sig_flip.pem"
-sed -E '/^32473.1 1 0 4 /s/ [A-Za-z0-9+\/]([A-Za-z0-9+\/]*=)$/ A\1/' "$B/ossl/subtrees-1.txt" > "$B/neg/subtrees-wrong.txt"
-cmp -s "$B/ossl/subtrees-1.txt" "$B/neg/subtrees-wrong.txt" && { say "the wrong-hash subtree file is not wrong"; FAILURES=$((FAILURES+1)); }
-N=$(ls "$B"/ca/certs/1/*.pem | wc -l)
-say "issued: $N certificates ($(ls "$B"/ca/certs/1/*-landmark-*.pem | wc -l) landmark-relative), $(grep -c '^landmark' "$B/issue.log") landmarks; $(ls "$B"/neg/*.pem | wc -l) negatives derived"
-CERTS=("$B"/ca/certs/1/*.pem "$B"/neg/*.pem)
-CA=(--ca-cert "$B/ossl/ca-cert.pem"); CORE_CA=(-ca-cert "$B/ossl/ca-cert.pem")
-case_b() { # LABEL BOB-ARGS... -- CORE-ARGS...
-  local label=$1; shift; local bob=() core=()
-  while [ "$1" != -- ]; do bob+=("$1"); shift; done; shift; core=("$@")
-  "$MTC" verify "${CA[@]}" ${bob[@]+"${bob[@]}"} "${CERTS[@]}" 2>&1 | verdict > "$B/bob-$label.txt" || true
-  "$INTEROP" verify "${CORE_CA[@]}" ${core[@]+"${core[@]}"} "${CERTS[@]}" 2>/dev/null | verdict > "$B/core-$label.txt" || true
-  same "$label: mtc-core against mtc verify" "$B/bob-$label.txt" "$B/core-$label.txt"
-}
-case_b subtrees+mirror --subtrees "$B/ossl/subtrees-1.txt" --cosigner-cert "$B/ossl/cosigners.pem" --quorum 1 \
-  -- -subtrees "$B/ossl/subtrees-1.txt" -cosigner-cert "$B/ossl/cosigners.pem" -require 32473.2
-if [ "$(grep -cE '^[0-9]+(-landmark-[0-9]+)?\.pem OK$' "$B/core-subtrees+mirror.txt" || true)" -eq "$N" ] &&
-   [ "$(grep -c '_bitflip\.pem FAIL$' "$B/core-subtrees+mirror.txt" || true)" -eq 2 ]; then
-  say "  every certificate the CA issued verifies; each bit flip of a proof fails"
-else
-  say "  NOT every issued certificate verifies, or a flipped proof passes"; FAILURES=$((FAILURES+1))
-fi
-case_b mirror --cosigner-cert "$B/ossl/cosigners.pem" --quorum 1 \
-  -- -cosigner-cert "$B/ossl/cosigners.pem" -require 32473.2
-case_b ca-only --
-case_b wrong-subtree-hash --subtrees "$B/neg/subtrees-wrong.txt" -- -subtrees "$B/neg/subtrees-wrong.txt"
+OIDSET="$ROOT/interop/oidset.py"
+# Once with each OID set the CA can issue with: the draft's experimental
+# set, and the IANA set since mtc's 31f118e (`--iana-oids`). The mirror's
+# cosigner certificate has the experimental attribute either way.
+for OIDS in experimental-06 iana; do
+  FLAGS=(); FAMILY=experimental
+  if [ "$OIDS" = iana ]; then
+    # The whole help is read before it is searched: with `| grep -q`, grep
+    # could close the pipe first, and under pipefail mtc's SIGPIPE would
+    # read as a missing option (AUDIT.md §28).
+    HELP=$("$MTC" ca new --help 2>&1) || true
+    case "$HELP" in
+      *--iana-oids*) ;;
+      *) say "iana OIDs: this mtc cannot issue with them (no --iana-oids; added in 31f118e), not measured"
+         continue ;;
+    esac
+    FLAGS=(--iana-oids); FAMILY=iana
+  fi
+  B="$OUT/bob-$OIDS"; rm -rf "$B"; mkdir -p "$B/keys" "$B/neg"
+  PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+  "$MTC" ca -p "$B/ca" new --log 1 --max-lifetime 168h --landmark-interval 1s ${FLAGS[@]+"${FLAGS[@]}"} 32473.1 > "$B/setup.log"
+  "$MTC" mirror -p "$B/mirror" new 32473.2 >> "$B/setup.log"
+  "$MTC" mirror -p "$B/mirror" add-log --log 1 "$B/ca/ca-cert.pem" >> "$B/setup.log"
+  "$MTC" mirror -p "$B/mirror" serve --listen "localhost:$PORT" > "$B/mirror.log" 2>&1 &
+  MIRROR_PID=$!
+  for _ in $(seq 50); do grep -q serving "$B/mirror.log" && break; sleep 0.1; done
+  "$MTC" ca -p "$B/ca" add-mirror --required "http://localhost:$PORT" "$B/mirror/cosigner-cert.pem" >> "$B/setup.log"
+  q() { "$MTC" ca -p "$B/ca" queue --generate-key "$1" --key "$B/keys/k$2.pem" --dns "b$2.example" >/dev/null; }
+  for i in 1 2 3 4 5; do q p256 $i; done; q mldsa44 6
+  "$MTC" ca -p "$B/ca" issue > "$B/issue.log"; sleep 2
+  for i in 7 8 9; do q p256 $i; done
+  "$MTC" ca -p "$B/ca" issue >> "$B/issue.log"; sleep 2
+  q p256 10
+  "$MTC" ca -p "$B/ca" issue >> "$B/issue.log"
+  kill "$MIRROR_PID"; MIRROR_PID=
+  "$MTC" ca -p "$B/ca" export-openssl -o "$B/ossl" > /dev/null
+  # Negatives, derived at the byte level by flip.py (no MTC code): entry 0's
+  # subtree [0, 4) has a two-hash inclusion proof and two cosignatures (the
+  # CA's, then the mirror's). The wrong hash changes the first base64
+  # character to A, or to B if it was A (it was left equal one time in 64
+  # before §28).
+  python3 "$FLIP" proof "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_bitflip.pem"
+  python3 "$FLIP" proof "$B/ca/certs/1/0-landmark-1.pem" "$B/neg/0_landmark_bitflip.pem"
+  python3 "$FLIP" sig 0 "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_ca_sig_flip.pem"
+  python3 "$FLIP" sig 1 "$B/ca/certs/1/0.pem" "$B/neg/0_standalone_mirror_sig_flip.pem"
+  sed -E '/^32473.1 1 0 4 /{s/ A([A-Za-z0-9+\/]*=)$/ B\1/;t;s/ [A-Za-z0-9+\/]([A-Za-z0-9+\/]*=)$/ A\1/}' "$B/ossl/subtrees-1.txt" > "$B/neg/subtrees-wrong.txt"
+  cmp -s "$B/ossl/subtrees-1.txt" "$B/neg/subtrees-wrong.txt" && { say "$OIDS OIDs: the wrong-hash subtree file is not wrong"; FAILURES=$((FAILURES+1)); }
+  N=$(ls "$B"/ca/certs/1/*.pem | wc -l)
+  say "$OIDS OIDs, issued: $N certificates ($(ls "$B"/ca/certs/1/*-landmark-*.pem | wc -l) landmark-relative), $(grep -c '^landmark' "$B/issue.log") landmarks; $(ls "$B"/neg/*.pem | wc -l) negatives derived"
+  # The certificates and the CA certificate carry the set asked for, and only
+  # it (oidset.py reads the bytes, not an MTC implementation).
+  if python3 "$OIDSET" "$B"/ca/certs/1/*.pem "$B/ossl/ca-cert.pem" | awk -v f="$FAMILY" '$2 != f { bad = 1 } END { exit bad }'; then
+    say "  the $N certificates and the CA certificate are written with the $FAMILY OIDs only"
+  else
+    say "  NOT every certificate, or the CA certificate, is written with the $FAMILY OIDs only"; FAILURES=$((FAILURES+1))
+  fi
+  say "  the mirror's cosigner certificate is written with the $(python3 "$OIDSET" "$B/ossl/cosigners.pem" | awk '{print $2}') OIDs"
+  CERTS=("$B"/ca/certs/1/*.pem "$B"/neg/*.pem)
+  CA=(--ca-cert "$B/ossl/ca-cert.pem"); CORE_CA=(-ca-cert "$B/ossl/ca-cert.pem")
+  case_b() { # LABEL BOB-ARGS... -- CORE-ARGS...
+    local label=$1; shift; local bob=() core=()
+    while [ "$1" != -- ]; do bob+=("$1"); shift; done; shift; core=("$@")
+    "$MTC" verify "${CA[@]}" ${bob[@]+"${bob[@]}"} "${CERTS[@]}" 2>&1 | verdict > "$B/bob-$label.txt" || true
+    "$INTEROP" verify "${CORE_CA[@]}" ${core[@]+"${core[@]}"} "${CERTS[@]}" 2>/dev/null | verdict > "$B/core-$label.txt" || true
+    same "$OIDS OIDs, $label: mtc-core against mtc verify" "$B/bob-$label.txt" "$B/core-$label.txt"
+  }
+  case_b subtrees+mirror --subtrees "$B/ossl/subtrees-1.txt" --cosigner-cert "$B/ossl/cosigners.pem" --quorum 1 \
+    -- -subtrees "$B/ossl/subtrees-1.txt" -cosigner-cert "$B/ossl/cosigners.pem" -require 32473.2
+  if [ "$(grep -cE '^[0-9]+(-landmark-[0-9]+)?\.pem OK$' "$B/core-subtrees+mirror.txt" || true)" -eq "$N" ] &&
+     [ "$(grep -c '_bitflip\.pem FAIL$' "$B/core-subtrees+mirror.txt" || true)" -eq 2 ]; then
+    say "  every certificate the CA issued verifies; each bit flip of a proof fails"
+  else
+    say "  NOT every issued certificate verifies, or a flipped proof passes"; FAILURES=$((FAILURES+1))
+  fi
+  case_b mirror --cosigner-cert "$B/ossl/cosigners.pem" --quorum 1 \
+    -- -cosigner-cert "$B/ossl/cosigners.pem" -require 32473.2
+  case_b ca-only --
+  case_b wrong-subtree-hash --subtrees "$B/neg/subtrees-wrong.txt" -- -subtrees "$B/neg/subtrees-wrong.txt"
+done
 say "  (with the subtrees, a cosignature is not read: every standalone subtree of this CA is also a landmark's)"
 
 # ── 3. mtc-core → OpenSSL, over TLS 1.3 ──
@@ -189,7 +236,7 @@ for OIDS in iana experimental-06; do
   L=(-mtc_landmarks "32473.1:1:$R/landmarks.txt" -mtc_subtrees "$R/subtrees.txt")
   cat "$C/tls_landmark.pem" "$C/tls_standalone.pem" > "$R/good.pem"
   cat "$C/tls_landmark_bitflip.pem" "$C/tls_standalone.pem" > "$R/landmark-bitflip.pem"
-  sed -E '/^32473.1 1 16 21 /s/ [A-Za-z0-9+\/]([A-Za-z0-9+\/]*=)$/ A\1/' "$R/subtrees.txt" > "$R/subtrees-wrong.txt"
+  sed -E '/^32473.1 1 16 21 /{s/ A([A-Za-z0-9+\/]*=)$/ B\1/;t;s/ [A-Za-z0-9+\/]([A-Za-z0-9+\/]*=)$/ A\1/}' "$R/subtrees.txt" > "$R/subtrees-wrong.txt"
   say "$OIDS OIDs:"
   tls "$R" standalone OK tls_standalone.pem "$R/good.pem" -- -mtc_cas "$R/ca_cert.pem"
   tls "$R" landmark OK tls_landmark.pem "$R/good.pem" -- -mtc_cas "$R/ca_cert.pem" "${L[@]}"
@@ -203,7 +250,9 @@ for OIDS in iana experimental-06; do
   tls "$R" landmark-bitflip FAIL tls_landmark_bitflip.pem "$R/landmark-bitflip.pem" -- -mtc_cas "$R/ca_cert.pem" "${L[@]}"
   tls "$R" landmark-wrong-hash FAIL tls_landmark.pem "$R/good.pem" -- -mtc_cas "$R/ca_cert.pem" \
     -mtc_landmarks "32473.1:1:$R/landmarks.txt" -mtc_subtrees "$R/subtrees-wrong.txt"
-  tls "$R" other-ca-same-id FAIL tls_standalone.pem "$R/good.pem" -- -mtc_cas "$B/ossl/ca-cert.pem"
+  # Another CA under the same ID: his CA from section 2's experimental pass,
+  # which always runs, named here since that section became a loop (§28).
+  tls "$R" other-ca-same-id FAIL tls_standalone.pem "$R/good.pem" -- -mtc_cas "$OUT/bob-experimental-06/ossl/ca-cert.pem"
 done
 
 # ── 4. OpenSSL's corpus → mtc-core ──
